@@ -1,0 +1,811 @@
+﻿@page "/candidates"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using LocativeApp.Data
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+@inject NavigationManager Nav
+@inject IWebHostEnvironment Env
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject CurrentOwnerService CurrentOwnerService
+
+<h3 class="mb-4">
+    <i class="bi bi-people me-2"></i>
+    Gestion des candidats
+</h3>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<!-- FORMULAIRE -->
+@if (HasOpenProperties)
+{
+    <div class="card mb-4">
+
+        <div class="card-header d-flex justify-content-between align-items-center"
+        style="cursor:pointer"
+        @onclick="ToggleForm">
+
+            <h6 class="mb-0">
+                @(editCandidate.Id == 0 ? "➕ Nouveau candidat" : "✏️ Modifier candidat")
+            </h6>
+
+            <span>@(isFormCollapsed ? "▶" : "▼")</span>
+        </div>
+
+        @if (!isFormCollapsed)
+        {
+            <div class="card-body">
+
+                <!-- HEADER -->
+                <div class="mb-3">
+                    <h6 class="fw-bold mb-1">👤 Nouveau candidat</h6>
+                    <div class="text-muted small">Créer un dossier locataire</div>
+                </div>
+
+                <!-- IDENTITÉ -->
+                <div class="mb-3">
+                    <div class="text-uppercase text-muted small fw-semibold mb-2">Identité</div>
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <input class="form-control form-control-sm"
+                            placeholder="Prénom"
+                            @bind="editCandidate.FirstName" />
+                        </div>
+
+                        <div class="col-6">
+                            <input class="form-control form-control-sm"
+                            placeholder="Nom"
+                            @bind="editCandidate.LastName" />
+                        </div>
+                    </div>
+
+                    <input class="form-control form-control-sm mt-2"
+                    placeholder="Email"
+                    @bind="editCandidate.Email" />
+
+                    <input class="form-control form-control-sm mt-2"
+                    placeholder="Téléphone"
+                    @bind="editCandidate.Phone" />
+
+                    <div class="row g-2 mt-2">
+                        <div class="col-6">
+                            <input type="date"
+                            class="form-control form-control-sm"
+                            @bind="editCandidate.BirthDate" />
+                        </div>
+
+                        <div class="col-6">
+                            <input type="number"
+                            class="form-control form-control-sm"
+                            placeholder="Nb occupants"
+                            @bind="editCandidate.OccupantCount" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LOGEMENT -->
+                <div class="mb-3">
+                    <div class="text-uppercase text-muted small fw-semibold mb-2">Logement</div>
+
+                    <select class="form-select form-select-sm"
+                    @bind="editCandidate.PropertyId">
+                        <option value="">-- Choisir un bien --</option>
+                        @foreach (var p in properties)
+                        {
+                            <option value="@p.Id">
+                                @(p.PropertyType?.Name ?? "Bien non défini")
+                                • @p.Surface m²
+                                • @p.Address @p.PostalCode @p.City
+                                • @(p.IsFurnished ? " 🛋️ Meublé" : "") 
+                            </option>
+                        }
+                    </select>
+                </div>
+
+                <!-- SITUATION FINANCIÈRE -->
+                <div class="mb-3">
+                    <div class="text-uppercase text-muted small fw-semibold mb-2">Situation financière</div>
+
+                    <input class="form-control form-control-sm mb-2"
+                    type="number"
+                    placeholder="Revenu mensuel (€)"
+                    @bind="editCandidate.NetMonthlySalary" />
+
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input"
+                        type="checkbox"
+                        @bind="editCandidate.IndeterminateContract" />
+                        <label class="form-check-label">
+                            CDI (contrat indéterminé)
+                        </label>
+                    </div>
+
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input"
+                        type="checkbox"
+                        @bind="editCandidate.HasGuarantor" />
+                        <label class="form-check-label">
+                            Garant
+                        </label>
+                    </div>
+
+                    @if (editCandidate.HasGuarantor)
+                    {
+                        <input class="form-control form-control-sm"
+                        type="number"
+                        placeholder="Revenu garant (€)"
+                        @bind="editCandidate.GuarantorNetMonthlySalary" />
+                    }
+                </div>
+
+                <!-- STATUT -->
+                <div class="mb-3">
+                    <div class="text-uppercase text-muted small fw-semibold mb-2">Statut</div>
+
+                    <select class="form-select form-select-sm"
+                    @bind="editCandidate.Status">
+                        <option value="Interested">⏳ Intéressé</option>
+                        <option value="InReview">🔎 En analyse</option>
+                        <option value="Accepted">✔ Accepté</option>
+                        <option value="Rejected">✖ Refusé</option>
+                        <option value="Tenant">🏠 Locataire</option>
+                    </select>
+                </div>
+
+                <!-- ACTION -->
+                <button class="btn btn-primary w-100 shadow-sm" @onclick="AddCandidate">
+                    ➕ Ajouter le candidat
+                </button>
+            </div>
+        }
+
+    </div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body text-center text-muted">
+            ⚠️ Aucune campagne de candidature n’est ouverte.<br />
+            Activez une candidature depuis vos biens (menu ⋮ → 📢 Ouvrir candidatures).
+        </div>
+
+        <button class="btn btn-primary btn-sm" @onclick="GoToProperties">
+            Gérer mes biens
+        </button>
+    </div>
+}
+
+<!-- LISTE PAR BIEN -->
+<div class="row">
+
+    @foreach (var p in properties)
+    {
+        var candidatesForProperty = candidateList
+        .Where(c => c.PropertyId == p.Id && c.IsActive)
+        .ToList();
+
+        <div class="col-12 mb-4">
+
+            <div class="card shadow-sm">
+
+                <div class="card-header d-flex justify-content-between align-items-center"
+                style="cursor:pointer"
+                @onclick="() => ToggleProperty(p.Id)">
+
+                    <div class="position-relative w-100">
+
+                        <h6 class="mb-0 pe-5 fw-bold">
+                            🏠 @(p.PropertyType?.Name ?? "Bien")
+                            • @p.Surface m²
+                            • @($"{p.Address}, {p.PostalCode} {p.City}")
+                        </h6>
+
+                        @if (p.IsFurnished)
+                        {
+                            <span class="badge bg-info position-absolute top-0 end-0 m-2">
+                                🛋️ Meublé
+                            </span>
+                        }
+
+                    </div>
+
+                    <div>
+                        <span class="badge bg-danger">👥 @candidatesForProperty.Count</span>
+                        <span class="ms-2">@(IsCollapsed(p.Id) ? "▶" : "▼")</span>
+                    </div>
+
+                </div>
+
+                @if (!IsCollapsed(p.Id))
+                {
+                    <div class="card-body">
+
+                        @if (candidatesForProperty.Any())
+                        {
+                            <div class="row">
+
+                                @foreach (var c in candidatesForProperty.OrderByDescending(c => GetScore(c)))
+                                {
+
+                                    <div class="col-12 col-md-6 col-lg-4 mb-4">
+
+                                        <div class="card border-0 shadow-sm">
+
+                                            <div class="card border-0 shadow-sm rounded-4">
+
+                                                <div class="card-body p-3">
+
+                                                    <!-- HEADER -->
+                                                    <div class="d-flex justify-content-between align-items-center mb-2">
+
+                                                        <div class="fw-semibold text-truncate">
+                                                            👤 @c.FirstName @c.LastName
+                                                        </div>
+
+                                                        <!-- ETOLES -->
+                                                        @{
+                                                            var stars = GetStarScore(c);
+                                                        }
+
+                                                        <div class="mb-2 text-warning">
+                                                            @for (int i = 1; i <= 5; i++)
+                                                            {
+                                                                if (i <= stars)
+                                                                {
+                                                                    <i class="bi bi-star-fill" style="font-size:0.8rem;"></i>
+                                                                }
+                                                                else
+                                                                {
+                                                                    <i class="bi bi-star" style="font-size:0.8rem;"></i>
+                                                                }
+                                                            }
+                                                        </div>
+
+                                                    </div>
+
+                                                    <!-- EMAIL + TEL -->
+                                                    <div class="text-muted small mb-2 text-truncate">
+                                                        <i class="bi bi-envelope me-1"></i> @c.Email
+                                                    </div>
+
+                                                    <div class="text-muted small mb-3">
+                                                        <i class="bi bi-phone me-1"></i> @c.Phone
+                                                    </div>
+
+                                                    <!-- KPI (SANS DÉBORDEMENT) -->
+                                                    <div class="d-flex flex-wrap gap-1 mb-3">
+
+                                                        <span class="badge bg-light text-dark">
+                                                            💰 @($"{c.NetMonthlySalary:N0}€")
+                                                        </span>
+
+                                                        <span class="badge bg-light text-dark">
+                                                            👥 @c.OccupantCount
+                                                        </span>
+
+                                                        <span class="badge @(c.IndeterminateContract ? "bg-success" : "bg-secondary")">
+                                                            @(c.IndeterminateContract ? "CDI" : "CDD")
+                                                        </span>
+
+                                                    </div>
+                                                    <div class="d-flex flex-wrap gap-1 mb-3">
+                                                        <span class="badge @(c.HasGuarantor ? "bg-info text-dark" : "bg-light text-muted")">
+                                                            @(c.HasGuarantor ? "Avec garant" : "Sans garant")
+                                                        </span>
+                                                    </div>
+                                                    <!-- SCORE -->
+                                                    @{
+                                                        var score = GetScore(c);
+                                                    }
+
+                                                    <div class="mb-3">
+
+                                                        <div class="d-flex justify-content-between small">
+                                                            <span class="text-muted">Score</span>
+                                                            <span class="fw-semibold">@Math.Round(score, 2)</span>
+                                                        </div>
+
+                                                        <div class="progress mt-1" style="height:5px;">
+                                                            <div class="progress-bar
+                                                                @(score >= 4 ? "bg-success" :
+                                                                  score >= 3 ? "bg-warning" :
+                                                                  "bg-danger")"
+                                                            style="width:@Math.Min(score * 25, 100)%">
+                                                            </div>
+                                                        </div>
+
+                                                    </div>
+
+                                                    <!-- ACTIONS -->
+                                                    <div class="d-grid gap-2">
+
+                                                        <select class="form-select form-select-sm"
+                                                        value="@c.Status"
+                                                        @onchange="(e) => UpdateStatus(c, e.Value?.ToString())">
+
+                                                            <option value="Interested">⏳ Intéressé</option>
+                                                            <option value="InReview">🔎 Analyse</option>
+                                                            <option value="Accepted">✔ Accepté</option>
+                                                            <option value="Rejected">✖ Refusé</option>
+                                                            <option value="Tenant">🏠 Locataire</option>
+
+                                                        </select>
+
+                                                        <button class="btn btn-sm btn-outline-secondary"
+                                                        @onclick="() => Deactivate(c)">
+                                                            🚫 Désactiver
+                                                        </button>
+
+                                                        @if (c.Status != "Tenant")
+                                                        {
+                                                            <button class="btn btn-sm btn-success"
+                                                            disabled="@(c.Property?.LeaseContracts?.Any(l => l.EndDate == null) == true)"
+                                                            @onclick="() => ConvertToTenant(c)">
+                                                                🏠 Transformer
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="badge bg-primary text-center p-2">
+                                                                🏠 Locataire actif
+                                                            </div>
+                                                        }
+
+                                                    </div>
+
+                                                </div>
+
+                                            </div>
+
+                                        </div>
+
+                                    </div>
+                                }
+
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center">
+                                <span class="badge bg-secondary">Aucun candidat</span>
+                            </div>
+                        }
+
+                    </div>
+                }
+
+            </div>
+
+        </div>
+    }
+
+</div>
+
+@code {
+
+    private List<Candidate> candidateList = new();
+    private List<Property> properties = new();
+    private List<PropertyType> propertyTypes = new();
+    private List<Feature> features = new();
+
+    private Candidate editCandidate = new();
+
+    private string? successMessage;
+    private string? errorMessage;
+
+    private bool isFormCollapsed = true;
+    private Dictionary<int, bool> collapsedProperties = new();
+
+    // Indique si il y a un bien ouvert au candidatures
+    private bool HasOpenProperties =>
+    properties.Any(p => p.AcceptingCandidates == true);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    // ===================== SAAS FIX =====================
+    private async Task LoadData()
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            properties = new();
+            candidateList = new();
+            return;
+        }
+
+
+        properties = await db.Properties
+            .Where(p => p.OwnerId == ownerId && p.AcceptingCandidates)
+            .Include(p => p.LeaseContracts)
+                .ThenInclude(l => l.Tenant)
+            .Include(p => p.CandidateList)
+            .Include(p => p.PropertyType)
+            .Include(p => p.PropertyFeatures)
+                .ThenInclude(pf => pf.Feature)
+            .AsNoTracking()
+            .ToListAsync();
+
+        propertyTypes = await db.PropertyTypes
+            .AsNoTracking()
+            .ToListAsync();
+
+        features = await db.Features
+            .AsNoTracking()
+            .ToListAsync();
+
+        candidateList = await db.Candidates
+            .Where(c => c.OwnerId == ownerId)
+            .Include(c => c.Property)
+            .Include(c => c.Documents)
+            .AsNoTracking()
+            .ToListAsync();
+
+        collapsedProperties = properties.ToDictionary(p => p.Id, p => true);
+    }
+
+    private void ToggleForm() => isFormCollapsed = !isFormCollapsed;
+
+    private void ToggleProperty(int id)
+    {
+        if (!collapsedProperties.ContainsKey(id))
+            collapsedProperties[id] = true;
+        else
+            collapsedProperties[id] = !collapsedProperties[id];
+    }
+
+    private bool IsCollapsed(int id)
+        => collapsedProperties.ContainsKey(id) && collapsedProperties[id];
+
+    // ===================== BUSINESS LOGIC (inchangée) =====================
+    void GoToProperties()
+    {
+        Nav.NavigateTo($"/properties");
+    }
+
+    private async Task Deactivate(Candidate c)
+    {
+        using var db = DbFactory.CreateDbContext();
+        var entity = await db.Candidates.FindAsync(c.Id);
+        if (entity == null) return;
+
+        entity.IsActive = false;
+        await db.SaveChangesAsync();
+
+        await LoadData();
+
+        successMessage = "Candidat désactivé avec succès !";
+    }
+
+    private async Task DeactivateAll(int propertyId)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var list = db.Candidates.Where(x => x.PropertyId == propertyId).ToList();
+
+        foreach (var c in list)
+            c.IsActive = false;
+
+        await db.SaveChangesAsync();
+        await LoadData();
+
+        successMessage = "Tous les candidat ont été désactivés avec succès !";
+    }
+
+    private async Task UpdateStatus(Candidate c, string? newStatus)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var entity = await db.Candidates.FindAsync(c.Id);
+        if (entity == null) return;
+
+        entity.Status = newStatus;
+        await db.SaveChangesAsync();
+
+        await LoadData();
+
+        successMessage = "Candidat mis à jour avec succès !";
+    }
+
+    private async Task ConvertToTenant(Candidate c)
+    {
+        using var db = DbFactory.CreateDbContext();
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            errorMessage = "Le owner n'existe pas.";
+            return;
+        }
+
+        var candidate = await db.Candidates
+            .FirstOrDefaultAsync(x => x.Id == c.Id);
+
+        if (candidate == null) return;
+        if (candidate.Status == "Tenant") return;
+
+        if (string.IsNullOrWhiteSpace(candidate.FirstName) ||
+            string.IsNullOrWhiteSpace(candidate.LastName))
+        {
+            errorMessage = "Candidat incomplet (prénom/nom manquant).";
+            return;
+        }
+
+        var user = await UserManager.FindByEmailAsync(candidate.Email);
+        if (user == null)
+        {
+            errorMessage = "Utilisateur introuvable.";
+            return;
+        }
+
+        var tenant = new Tenant
+            {
+                FirstName = candidate.FirstName,
+                LastName = candidate.LastName,
+                Email = candidate.Email,
+                Phone = candidate.Phone,
+                IsActive = true,
+                CreatedAt = DateTime.Now,
+                IdentityUserId = user.Id,
+                OwnerId = ownerId
+            };
+
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+
+        candidate.Status = "Tenant";
+        candidate.TenantId = tenant.Id;
+
+        var property = await db.Properties
+            .FirstOrDefaultAsync(p => p.Id == candidate.PropertyId);
+
+        if (property != null)
+        {
+            var lease = new LeaseContract
+                {
+                    PropertyId = property.Id,
+                    TenantId = tenant.Id,
+                    StartDate = DateTime.Now,
+                    RentAmount = property.RentAmount ?? 0
+                };
+
+            db.LeaseContracts.Add(lease);
+
+            property.AcceptingCandidates = false;
+            property.Sold = false;
+            property.IsActive = true;
+        }
+
+        await db.SaveChangesAsync();
+
+        // ======================================================
+        // 🔥 MIGRATION DES FICHIERS CANDIDATE → TENANT
+        // ======================================================
+
+        var safeFolder = $"{candidate.FirstName}_{candidate.LastName}"
+            .Replace(" ", "_");
+
+        var sourcePath = Path.Combine(
+            Env.WebRootPath,
+            "uploads",
+            "Candidates",
+            ownerId,
+            safeFolder);
+
+        var targetPath = Path.Combine(
+            Env.WebRootPath,
+            "uploads",
+            "Tenants",
+            ownerId,
+            safeFolder);
+
+        try
+        {
+            // 🔥 création dossier cible
+            if (!Directory.Exists(targetPath))
+                Directory.CreateDirectory(targetPath);
+
+            // 🔥 création dossier enfants
+            if (!Directory.Exists(Path.Combine(targetPath, "DocumentsCommun")))
+                Directory.CreateDirectory(Path.Combine(targetPath, "DocumentsCommun"));
+            if (!Directory.Exists(Path.Combine(targetPath, "DocumentsPropriétaire")))
+                Directory.CreateDirectory(Path.Combine(targetPath, "DocumentsPropriétaire"));
+
+            // 🔥 copie récursive fichiers + sous-dossiers
+            if (Directory.Exists(sourcePath))
+            {
+                foreach (var dirPath in Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
+                {
+                    Directory.CreateDirectory(dirPath.Replace(sourcePath, targetPath));
+                }
+
+                foreach (var filePath in Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories))
+                {
+                    var destFilePath = filePath.Replace(sourcePath, targetPath);
+                    File.Copy(filePath, destFilePath, true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Erreur copie fichiers : " + ex.Message;
+            return;
+        }
+
+        successMessage = "Converti en locataire avec migration des documents";
+
+        await LoadData();
+    }
+
+    private async Task AddCandidate()
+    {
+        using var db = DbFactory.CreateDbContext();
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        var entity = new Candidate
+            {
+                FirstName = editCandidate.FirstName,
+                LastName = editCandidate.LastName,
+                Email = editCandidate.Email,
+                Phone = editCandidate.Phone,
+                PropertyId = editCandidate.PropertyId,
+
+                // NOUVEAUX CHAMPS
+                BirthDate = editCandidate.BirthDate,
+                OccupantCount = editCandidate.OccupantCount,
+                NetMonthlySalary = editCandidate.NetMonthlySalary,
+                IndeterminateContract = editCandidate.IndeterminateContract,
+                HasGuarantor = editCandidate.HasGuarantor,
+                GuarantorNetMonthlySalary = editCandidate.HasGuarantor
+                    ? editCandidate.GuarantorNetMonthlySalary
+                    : 0,
+
+                // EXISTANT
+                Status = string.IsNullOrEmpty(editCandidate.Status) ? "Interested" : editCandidate.Status,
+                CreatedAt = DateTime.Now,
+                OwnerId = ownerId
+            };
+
+        db.Candidates.Add(entity);
+
+        // 🔐 Création user si inexistant
+        var user = await UserManager.FindByEmailAsync(entity.Email);
+
+        if (user == null)
+        {
+            user = new ApplicationUser
+                {
+                    UserName = entity.Email,
+                    Email = entity.Email,
+                    EmailConfirmed = true,
+                    FirstName = entity.FirstName,
+                    LastName = entity.LastName,
+                    RoleType = "Tenant",
+                    OwnerId = ownerId
+                };
+
+            var result = await UserManager.CreateAsync(user, "Tenant123!");
+
+            if (!result.Succeeded)
+            {
+                errorMessage = string.Join(" | ", result.Errors.Select(e => e.Description));
+                return;
+            }
+
+            await UserManager.AddToRoleAsync(user, "Tenant");
+        }
+
+        await db.SaveChangesAsync();
+
+        // 🔄 Reset propre du form avec valeurs par défaut
+        editCandidate = new Candidate
+            {
+                IndeterminateContract = true,
+                HasGuarantor = true,
+                OccupantCount = 1
+            };
+
+        await LoadData();
+
+        successMessage = "Candidat ajouté avec succès !";
+    }
+
+    private async Task Delete(int id)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var c = await db.Candidates.FindAsync(id);
+        if (c != null)
+        {
+            db.Candidates.Remove(c);
+            await db.SaveChangesAsync();
+        }
+
+        await LoadData();
+
+        successMessage = "Candidat supprimé avec succès !";
+    }
+
+    /// <summary>
+    /// Score de 1 à 5 étoiles basé sur le ratio revenu/loyer et les bonus CDI/garant
+    /// </summary>
+    /// <param name="c"></param>
+    /// <returns></returns>
+    private int GetStarScore(Candidate c)
+    {
+        var score = GetScore(c);
+
+        if (score >= 4) return 5;
+        if (score >= 3) return 4;
+        if (score >= 2) return 3;
+        if (score >= 1) return 2;
+
+        return 1;
+    }
+    /// <summary>
+    /// Score de 0 à 5 basé sur le ratio revenu/loyer, avec bonus pour CDI 
+    /// et garant, et pénalité si < 3x le loyer
+    /// </summary>
+	/// <param name="c"></param>
+	/// <returns></returns>
+	private decimal GetScore(Candidate c)
+    {
+        decimal totalIncome = c.NetMonthlySalary + c.GuarantorNetMonthlySalary;
+        decimal rent = c.Property?.RentAmount ?? 0;
+
+        if (rent <= 0)
+            return 0;
+
+        decimal ratio = totalIncome / rent;
+
+        decimal score = ratio;
+
+        // =========================
+        // BONUS LOGIQUE MÉTIER
+        // =========================
+
+        // 1. ≥ 3x loyer + CDI + garant (meilleur cas)
+        if (ratio >= 3 && c.IndeterminateContract && c.HasGuarantor)
+        {
+            score += 1.0m;
+        }
+        // 2. ≥ 3x loyer + CDI
+        else if (ratio >= 3 && c.IndeterminateContract)
+        {
+            score += 0.6m;
+        }
+        // 3. ≥ 3x loyer seul
+        else if (ratio >= 3)
+        {
+            score += 0.2m;
+        }
+        // 4. < 3x loyer → pénalité implicite
+        else
+        {
+            score -= 0.5m;
+        }
+
+        return score;
+    }
+}

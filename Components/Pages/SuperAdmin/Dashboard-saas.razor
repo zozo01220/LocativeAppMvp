@@ -1,0 +1,288 @@
+﻿@page "/dashboard-saas"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "SuperAdmin")]
+
+@inject OwnerService OwnerService
+@inject AdminService AdminService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IJSRuntime JS
+
+@using LocativeApp.Data
+@using Microsoft.EntityFrameworkCore
+
+<style>
+
+    .owner-grid {
+        display: grid;
+        grid-template-columns: repeat(1, 1fr);
+        gap: 16px;
+    }
+
+    /* CARD PRINCIPALE (IDENTIQUE ADMIN) */
+    .owner-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        transition: all 0.2s ease;
+        overflow: hidden;
+    }
+
+        /* 🔥 HOVER IDENTIQUE ADMIN */
+        .owner-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+        }
+
+    /* HEADER */
+    .owner-card-header {
+        padding: 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+    }
+
+        /* micro hover header comme admin */
+        .owner-card-header:hover {
+            background: #f8f9fa;
+        }
+
+    /* BODY */
+    .owner-card-body {
+        padding: 14px;
+        border-top: 1px solid #eee;
+    }
+
+    /* BADGES PLANS */
+    .plan-badge {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-weight: 600;
+    }
+
+    .plan-free {
+        background: #e9ecef;
+    }
+
+    .plan-pro {
+        background: #d0ebff;
+    }
+
+    .plan-business {
+        background: #d3f9d8;
+    }
+
+</style>
+<h3 class="mb-4">☁️ Dashboard SaaS (SuperAdmin)</h3>
+
+@if (isLoading)
+{
+    <p>Chargement...</p>
+}
+else
+{
+    <!-- ================= KPIs ================= -->
+    <div class="row text-center">
+
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3 card-hover">
+                <h6 class="text-muted">Owners</h6>
+                <h2 class="fw-bold">@totalOwners</h2>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3 card-hover">
+                <h6 class="text-muted">Owners actifs</h6>
+                <h2 class="fw-bold">@activeOwners</h2>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3 card-hover">
+                <h6 class="text-muted">Admins</h6>
+                <h2 class="fw-bold">@totalAdmins</h2>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3 card-hover">
+                <h6 class="text-muted">Biens total</h6>
+                <h2 class="fw-bold">@totalProperties</h2>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ================= PLANS ================= -->
+    <div class="row text-center mt-2">
+
+        <div class="col-12 col-md-4 mb-3">
+            <div class="kpi-card">
+                <div class="kpi-label">Free</div>
+                <div class="kpi-value">@freeOwners</div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4 mb-3">
+            <div class="kpi-card">
+                <div class="kpi-label">Pro</div>
+                <div class="kpi-value">@proOwners</div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4 mb-3">
+            <div class="kpi-card">
+                <div class="kpi-label">Business</div>
+                <div class="kpi-value">@businessOwners</div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ================= CHART ================= -->
+    <div class="row mt-3">
+
+        <!-- 📊 PLANS -->
+        <div class="col-12 col-lg-6 mb-3">
+            <div class="card shadow-sm p-3 h-100 card-hover">
+                ">
+                <h6 class="mb-3">📊 Répartition des plans</h6>
+
+                <div style="max-width: 280px; margin: auto;">
+                    <canvas id="plansChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📌 ACTIVITÉ -->
+        <div class="col-12 col-lg-6 mb-3">
+            <div class="card shadow-sm p-3 h-100 card-hover">
+                <h6 class="mb-3">📌 Vue globale activité</h6>
+
+                <div class="row">
+
+                    <div class="col-12 col-md-6">
+                        <ul class="list-group">
+                            <li class="list-group-item d-flex justify-content-between">
+                                Owners actifs
+                                <strong>@activeOwners</strong>
+                            </li>
+
+                            <li class="list-group-item d-flex justify-content-between">
+                                Owners inactifs
+                                <strong>@(totalOwners - activeOwners)</strong>
+                            </li>
+
+                            <li class="list-group-item d-flex justify-content-between">
+                                Admins moyens / owner
+                                <strong>@avgAdminsPerOwner.ToString("0.0")</strong>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="col-12 col-md-6 mt-3 mt-md-0">
+                        <ul class="list-group">
+                            <li class="list-group-item d-flex justify-content-between">
+                                Free %
+                                <strong>@GetPercent(freeOwners)</strong>
+                            </li>
+
+                            <li class="list-group-item d-flex justify-content-between">
+                                Pro %
+                                <strong>@GetPercent(proOwners)</strong>
+                            </li>
+
+                            <li class="list-group-item d-flex justify-content-between">
+                                Business %
+                                <strong>@GetPercent(businessOwners)</strong>
+                            </li>
+                        </ul>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+}
+
+@code {
+
+    private List<Owner> owners = new();
+    private List<ApplicationUser> admins = new();
+
+    private bool isLoading = true;
+
+    // KPIs
+    private int totalOwners;
+    private int activeOwners;
+    private int totalAdmins;
+    private int totalProperties;
+
+    // Plans
+    private int freeOwners;
+    private int proOwners;
+    private int businessOwners;
+
+    private double avgAdminsPerOwner;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        owners = await OwnerService.GetAll();
+        admins = await AdminService.GetAll();
+
+        using var db = DbFactory.CreateDbContext();
+
+        totalProperties = await db.Properties.CountAsync();
+
+        // ================= OWNERS =================
+        totalOwners = owners.Count;
+        activeOwners = owners.Count(o => o.IsActive);
+
+        freeOwners = owners.Count(o => o.Plan == "Free");
+        proOwners = owners.Count(o => o.Plan == "Pro");
+        businessOwners = owners.Count(o => o.Plan == "Business");
+
+        // ================= ADMINS =================
+        totalAdmins = admins.Count;
+
+        avgAdminsPerOwner = totalOwners == 0
+            ? 0
+            : (double)totalAdmins / totalOwners;
+
+        isLoading = false;
+
+
+    }
+
+    bool chartRendered = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!chartRendered && !isLoading)
+        {
+            chartRendered = true;
+
+            await JS.InvokeVoidAsync(
+                "renderPlansChart",
+                freeOwners,
+                proOwners,
+                businessOwners
+            );
+        }
+    }
+
+    private string GetPercent(int value)
+    {
+        if (totalOwners == 0) return "0%";
+
+        return ((value * 100.0) / totalOwners).ToString("0.0") + "%";
+    }
+}

@@ -1,0 +1,284 @@
+﻿@page "/my-payments"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using LocativeApp.Data
+@using System.Security.Claims
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Tenant")]
+
+<style>
+    .doc-card {
+        border: none;
+        border-radius: 16px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+        transition: 0.2s ease;
+    }
+
+        .doc-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.10);
+        }
+
+    .section-header {
+        cursor: pointer;
+        background: #f8f9fa;
+        border-radius: 14px;
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+    }
+
+    .icon-circle {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: #f1f5f9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+    }
+
+    .badge-soft {
+        background: #eef2ff;
+        color: #4f46e5;
+    }
+
+    .payment-table thead {
+        background: #f8f9fa;
+    }
+
+    .kpi-card {
+        background: white;
+        border-radius: 14px;
+        padding: 14px;
+        border: 1px solid #eee;
+    }
+</style>
+
+<h3 class="mb-4">
+    <i class="bi bi-cash-stack me-2"></i>
+    Mes paiements
+</h3>
+
+@if (tenant == null)
+{
+    <p>Chargement...</p>
+}
+else
+{
+    <!-- ================= HEADER COLLAPSIBLE ================= -->
+    <div class="card doc-card mb-3">
+
+        <div class="section-header" @onclick="ToggleSummary">
+
+            <div class="d-flex align-items-center gap-2">
+
+                <span class="icon-circle">👤</span>
+
+                <div>
+                    <div class="fw-bold">
+                        @tenant.FirstName @tenant.LastName
+                    </div>
+                    <small class="text-muted">
+                        @tenant.Email
+                    </small>
+                </div>
+
+            </div>
+
+            <span>@(IsCollapsed("summary") ? "▶" : "▼")</span>
+
+        </div>
+
+        @if (!IsCollapsed("summary"))
+        {
+            <div class="card-body">
+
+                <div class="row g-3">
+
+                    <div class="col-6">
+                        <div class="kpi-card text-center">
+                            <div class="fw-bold text-success">@paidCount</div>
+                            <small class="text-muted">Payés</small>
+                        </div>
+                    </div>
+
+                    <div class="col-6">
+                        <div class="kpi-card text-center">
+                            <div class="fw-bold text-danger">@unpaidCount</div>
+                            <small class="text-muted">Impayés</small>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="progress mt-3" style="height:10px;">
+                    <div class="progress-bar bg-success"
+                    style="width:@progress%"></div>
+                </div>
+
+                <div class="text-center mt-2 small text-muted">
+                    @progress% de paiements effectués
+                </div>
+
+            </div>
+        }
+
+    </div>
+
+    <!-- ================= TABLE ================= -->
+    <div class="card doc-card">
+
+        <div class="section-header" @onclick="ToggleTable">
+
+            <div class="d-flex align-items-center gap-2">
+
+                <span class="icon-circle">📊</span>
+
+                <div>
+                    <div class="fw-bold">Historique des paiements</div>
+                    <small class="text-muted">@payments.Count éléments</small>
+                </div>
+
+            </div>
+
+            <span>@(IsCollapsed("table") ? "▶" : "▼")</span>
+
+        </div>
+
+        @if (!IsCollapsed("table"))
+        {
+            <div class="card-body p-0">
+
+                <table class="table table-hover mb-0 payment-table">
+
+                    <thead>
+                        <tr>
+                            <th>Période</th>
+                            <th>Montant</th>
+                            <th>Date</th>
+                            <th>Statut</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        @foreach (var p in payments)
+                        {
+                            <tr>
+                                <td>@p.Month/@p.Year</td>
+                                <td>@p.AmountPaid €</td>
+                                <td>
+                                    @(p.PaidDate.HasValue
+                                            ? p.PaidDate.Value.ToString("dd/MM/yyyy")
+                                            : "-")
+                                </td>
+                                <td>
+                                    @if (p.IsPaid)
+                                    {
+                                        <span class="badge bg-success">✔ Payé</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger">❌ Impayé</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+
+                    </tbody>
+
+                </table>
+
+            </div>
+        }
+
+    </div>
+}
+
+@code {
+
+    private Tenant tenant;
+    private List<RentPayment> payments = new();
+
+    private int paidCount;
+    private int unpaidCount;
+    private double progress;
+
+    private Dictionary<string, bool> collapsed = new();
+
+
+    bool IsCollapsed(string key)
+        => collapsed.ContainsKey(key) && collapsed[key];
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userPrincipal = authState.User;
+
+        if (userPrincipal == null)
+            return;
+
+        var user = await UserManager.GetUserAsync(userPrincipal);
+
+        if (user == null)
+            return;
+
+        tenant = await db.Tenants
+            .FirstOrDefaultAsync(t => t.IdentityUserId == user.Id);
+
+        if (tenant == null)
+            return;
+
+        // 🔄 TRI INVERSÉ (plus récent → plus ancien)
+        payments = await db.RentPayments
+            .Where(p => p.TenantId == tenant.Id && p.OwnerId == ownerId)
+            .OrderByDescending(p => p.Year)
+            .ThenByDescending(p => p.Month)
+            .AsNoTracking()
+            .ToListAsync();
+
+        paidCount = payments.Count(x => x.IsPaid);
+        unpaidCount = payments.Count(x => !x.IsPaid);
+
+        progress = payments.Count == 0
+            ? 0
+            : (paidCount * 100.0 / payments.Count);
+
+        progress = Math.Round(progress, 0);
+    }
+
+    void ToggleSummary()
+    { 
+        Toggle("summary"); 
+    }
+
+    void ToggleTable() 
+    {
+        Toggle("table");
+    }
+
+    void Toggle(string key)
+    {
+        if (!collapsed.ContainsKey(key))
+            collapsed[key] = true;
+
+        collapsed[key] = !collapsed[key];
+    }
+}

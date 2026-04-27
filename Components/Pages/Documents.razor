@@ -1,0 +1,408 @@
+﻿@page "/documents"
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using LocativeApp.Data
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+
+<!-- <div class="container-fluid"> -->
+
+    <!-- HEADER -->
+    <h3 class="mb-4">
+        <i class="bi bi-folder me-2"></i>
+        Gestion des documents
+    </h3>
+
+
+    <!-- FILTRES -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+
+                <div class="col-12 col-lg-3">
+                    <label class="form-label small text-muted">Statut</label>
+                    <select class="form-select" @bind="filterIsActive">
+                        <option value="">Tous</option>
+                        <option value="true">Actifs</option>
+                        <option value="false">Inactifs</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <label class="form-label small text-muted">Bien</label>
+                    <select class="form-select" @bind="filterPropertyId">
+                        <option value="">Tous les biens</option>
+                        @foreach (var p in properties)
+                        {
+                            <option value="@p.Id">
+                                @p.PropertyType?.Name - @p.Surface m² - @p.Address, @p.PostalCode @p.City
+                            </option>
+                        }
+                </select>
+            </div>
+
+            <div class="col-12 col-lg-3">
+                <label class="form-label small text-muted">Nom</label>
+                <input class="form-control" @bind="filterLastName" />
+            </div>
+
+            <div class="col-12 col-lg-3">
+                <label class="form-label small text-muted">Prénom</label>
+                <input class="form-control" @bind="filterFirstName" />
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- RESULTATS -->
+@if (!FilteredTenants.Any())
+{
+    <div class="text-center text-muted mt-5">
+        <i class="bi bi-folder-x fs-1"></i>
+        <p>Aucun document trouvé</p>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+
+        @foreach (var vm in FilteredTenants)
+        {
+            <div class="col-12">
+
+                <div class="card shadow-sm border-0 h-100">
+
+                    <!-- HEADER -->
+                    <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center">
+
+                        <div>
+                            <div class="fw-bold">
+                                👤 @vm.Tenant.FirstName @vm.Tenant.LastName
+                            </div>
+
+                            <small class="text-muted">
+                                @if (vm.Property != null)
+                                {
+                                    @($"{vm.Property.PropertyType?.Name} - {vm.Property.Surface} m² - {vm.Property.Address}, {vm.Property.PostalCode} {vm.Property.City}")
+                                }
+                            </small>
+                        </div>
+
+                        <div class="d-flex align-items-center gap-2">
+
+                            <span class="badge bg-dark">
+                                @vm.Files.Count fichier(s)
+                            </span>
+
+                            <span class="badge @(vm.Tenant.IsActive ? "bg-success" : "bg-danger")">
+                                @(vm.Tenant.IsActive ? "Actif" : "Inactif")
+                            </span>
+
+                            <button class="btn btn-sm btn-light"
+                            @onclick="() => Toggle(vm.FolderName)">
+                                @(IsCollapsed(vm.FolderName) ? "▶" : "▼")
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                    <!-- FILES -->
+                    @if (!IsCollapsed(vm.FolderName))
+                    {
+                        <div class="card-body">
+
+                            @if (vm.Files.Any())
+                            {
+                                <!-- ========================= -->
+                                <!-- 📂 1. DOCUMENTS LOCATAIRE -->
+                                <!-- ========================= -->
+                                <div class="mb-4">
+
+                                    <h6 class="fw-bold text-primary mb-2">
+                                        📁 Documents locataires
+                                    </h6>
+
+                                    @foreach (var file in vm.Files.Where(f =>
+                                  !f.FileName.Contains("DocumentsCommun") &&
+                                  !f.FileName.Contains("DocumentsProprietaire")))
+                                    {
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                                            <a href="@file.Url"
+                                            target="_blank"
+                                            class="text-decoration-none fw-semibold">
+                                                📄 @file.FileName
+                                            </a>
+
+                                            <button class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => DeleteFile(vm.FolderName, file)">
+                                                X
+                                            </button>
+
+                                        </div>
+                                    }
+
+                                </div>
+
+                                <!-- ========================= -->
+                                <!-- 📂 2. DOCUMENTS COMMUNS -->
+                                <!-- ========================= -->
+                                <div class="mb-4">
+
+                                    <h6 class="fw-bold text-success mb-2">
+                                        📁 Documents communs
+                                    </h6>
+
+                                    @foreach (var file in vm.Files.Where(f =>
+                                  f.FileName.Contains("DocumentsCommun")))
+                                    {
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                                            <a href="@file.Url"
+                                            target="_blank"
+                                            class="text-decoration-none fw-semibold">
+                                                📄 @file.FileName
+                                            </a>
+
+                                            <button class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => DeleteFile(vm.FolderName, file)">
+                                                X
+                                            </button>
+
+                                        </div>
+                                    }
+
+                                </div>
+
+                                <!-- ========================= -->
+                                <!-- 📂 3. DOCUMENTS PROPRIÉTAIRES -->
+                                <!-- ========================= -->
+                                <div class="mb-2">
+
+                                    <h6 class="fw-bold text-warning mb-2">
+                                        📁 Documents propriétaires
+                                    </h6>
+
+                                    @foreach (var file in vm.Files.Where(f =>
+                                  f.FileName.Contains("DocumentsProprietaire")))
+                                    {
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                                            <a href="@file.Url"
+                                            target="_blank"
+                                            class="text-decoration-none fw-semibold">
+                                                📄 @file.FileName
+                                            </a>
+
+                                            <button class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => DeleteFile(vm.FolderName, file)">
+                                                X
+                                            </button>
+
+                                        </div>
+                                    }
+
+                                </div>
+
+                            }
+                            else
+                            {
+                                <div class="text-muted">Aucun fichier</div>
+                            }
+
+                        </div>
+                    }
+
+                </div>
+
+            </div>
+        }
+
+    </div>
+}
+
+<!-- </div> -->
+
+@code {
+
+
+
+    private List<TenantVm> tenantVms = new();
+    private Dictionary<string, bool> collapsed = new();
+
+    private string? filterFirstName;
+    private string? filterLastName;
+    private int? filterPropertyId;
+    private string? filterIsActive="";
+
+    private List<Property> properties = new();
+
+    private Candidate? candidate;
+    private List<string> etatDesLieuxFiles = new();
+    private List<string> bailFiles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        using var db = DbFactory.CreateDbContext();
+
+        // 🔥 LOAD TENANTS + CONTRACTS + PROPERTY
+        var tenants = await db.Tenants
+            .Include(t => t.LeaseContracts)
+                .ThenInclude(l => l.Property)
+                    .ThenInclude(p => p.PropertyType)
+            .Where(t => t.OwnerId == ownerId)
+            .ToListAsync();
+
+        properties = await db.Properties
+            .Where(p => p.OwnerId == ownerId && p.IsActive && !p.Sold)
+            .ToListAsync();
+
+        await LoadFolders(tenants);
+    }
+
+    async Task LoadFolders(List<Tenant> tenants)
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        if (ownerId == null) return;
+
+        var basePath = Path.Combine(Env.WebRootPath, "uploads", "Tenants", ownerId);
+
+        if (!Directory.Exists(basePath))
+			Directory.CreateDirectory(basePath);
+
+		var directories = Directory.GetDirectories(basePath);
+
+        foreach (var dir in directories)
+        {
+            var folderName = Path.GetFileName(dir);
+
+            var parts = folderName.Split('_');
+            var first = parts.ElementAtOrDefault(0);
+            var last = parts.ElementAtOrDefault(1);
+
+            var tenant = tenants.FirstOrDefault(t =>
+                t.FirstName.Equals(first, StringComparison.OrdinalIgnoreCase) &&
+                t.LastName.Equals(last, StringComparison.OrdinalIgnoreCase));
+
+            if (tenant == null) continue;
+
+            // 🔥 CONTRAT ACTIF
+            var lease = tenant.LeaseContracts
+                .OrderByDescending(l => l.StartDate)
+                .FirstOrDefault(l => l.EndDate == null || l.EndDate > DateTime.Now);
+
+            var files = Directory.GetFiles(dir)
+                .Select(f => new FileVm
+                    {
+                        FileName = Path.GetFileName(f),
+                        FullPath = f,
+                        Url = $"/uploads/Tenants/{ownerId}/{folderName}/{Path.GetFileName(f)}"
+                    }).ToList();
+
+            tenantVms.Add(new TenantVm
+                {
+                    Tenant = tenant,
+                    Property = lease?.Property,
+                    Files = files,
+                    FolderName = folderName
+                });
+
+            collapsed[folderName] = true;
+
+            // DOCUMENTS COMMUNS
+            var communPath = Path.Combine(dir, "DocumentsCommun");
+
+            var etatPath = Path.Combine(communPath, "EtatLieux");
+            var bailPath = Path.Combine(communPath, "Bail");
+
+            if (Directory.Exists(etatPath))
+            {
+                etatDesLieuxFiles.AddRange(
+                    Directory.GetFiles(etatPath)
+                        .Select(f => $"/uploads/Tenants/{ownerId}/{folderName}/DocumentsCommun/EtatLieux/{Path.GetFileName(f)}")
+                );
+            }
+
+            if (Directory.Exists(bailPath))
+            {
+                bailFiles.AddRange(
+                    Directory.GetFiles(bailPath)
+                        .Select(f => $"/uploads/Tenants/{ownerId}/{folderName}/DocumentsCommun/Bail/{Path.GetFileName(f)}")
+                );
+            }
+        }
+    }
+
+
+    private List<TenantVm> FilteredTenants => tenantVms.Where(vm =>
+    {
+        bool match = true;
+
+        if (!string.IsNullOrWhiteSpace(filterLastName))
+            match &= vm.Tenant.LastName.Contains(filterLastName, StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(filterFirstName))
+            match &= vm.Tenant.FirstName.Contains(filterFirstName, StringComparison.OrdinalIgnoreCase);
+
+        if (filterPropertyId.HasValue)
+            match &= vm.Property?.Id == filterPropertyId;
+
+        if (!string.IsNullOrWhiteSpace(filterIsActive) &&
+            bool.TryParse(filterIsActive, out var isActive))
+        {
+            match &= vm.Tenant.IsActive == isActive;
+        }
+
+        return match;
+
+    }).ToList();
+
+    void Toggle(string name)
+    {
+        collapsed[name] = !collapsed.GetValueOrDefault(name);
+    }
+
+    bool IsCollapsed(string name)
+        => collapsed.GetValueOrDefault(name);
+
+    async Task DeleteFile(string folder, FileVm file)
+    {
+        var confirm = await JS.InvokeAsync<bool>("confirm", $"Supprimer {file.FileName} ?");
+        if (!confirm) return;
+
+        if (File.Exists(file.FullPath))
+            File.Delete(file.FullPath);
+
+        tenantVms.Clear();
+        collapsed.Clear();
+
+        await OnInitializedAsync();
+    }
+
+    class TenantVm
+    {
+        public Tenant Tenant { get; set; }
+        public Property? Property { get; set; }
+        public List<FileVm> Files { get; set; } = new();
+        public string FolderName { get; set; }
+    }
+
+    class FileVm
+    {
+        public string FileName { get; set; }
+        public string FullPath { get; set; }
+        public string Url { get; set; }
+    }
+}

@@ -1,0 +1,701 @@
+﻿@page "/my-documents"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using LocativeApp.Data
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IWebHostEnvironment Env
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Tenant")]
+
+<style>
+    .doc-card {
+        border: none;
+        border-radius: 16px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+        transition: 0.2s ease;
+    }
+
+    .doc-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.10);
+    }
+
+    .section-header {
+        cursor: pointer;
+        background: #f8f9fa;
+        border-radius: 14px;
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+    }
+
+    .file-tile {
+        border: 1px solid #eee;
+        border-radius: 14px;
+        padding: 12px;
+        transition: 0.2s;
+        background: white;
+    }
+
+        .file-tile:hover {
+            background: #f8f9ff;
+            transform: scale(1.01);
+        }
+
+    .badge-soft {
+        background: #eef2ff;
+        color: #4f46e5;
+    }
+
+    .icon-circle {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: #f1f5f9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+    }
+
+    .upload-zone {
+        border: 1px dashed #d0d7de;
+        border-radius: 14px;
+        padding: 16px;
+        background: #fafbfc;
+    }
+</style>
+
+<h3 class="mb-4">
+    <i class="bi bi-folder-fill me-2"></i>
+    Mes documents
+</h3>
+
+@if (isLoading)
+{
+    <p>Chargement...</p>
+}
+else if (candidate == null)
+{
+    <div class="alert alert-warning">
+        Aucun profil candidat trouvé.
+    </div>
+}
+else
+{
+@*     <!-- ================= UPLOAD ================= -->
+    <div class="card doc-card p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between">
+            <div>
+                <h5 class="mb-1">📤 Déposer des documents</h5>
+                <small class="text-muted">PDF, images ou scans de vos documents</small>
+            </div>
+        </div>
+
+        <InputFile OnChange="HandleFilesSelected"
+        multiple
+        class="form-control mt-3" />
+
+        <button class="btn btn-primary mt-3 w-100"
+        @onclick="UploadFiles"
+        disabled="@(!selectedFiles.Any())">
+            Envoyer les fichiers
+        </button>
+    </div> *@
+    <!-- ================= UPLOAD ================= -->
+    <div class="card doc-card mb-3">
+
+        <!-- HEADER COLLAPSED -->
+        <div class="section-header" @onclick="ToggleUpload">
+
+            <div class="d-flex align-items-center gap-2">
+
+                <span class="icon-circle">📤</span>
+
+                <div>
+                    <div class="fw-bold">Déposer des documents</div>
+                    <small class="text-muted">
+                        PDF, images ou scans de vos documents
+                    </small>
+                </div>
+
+            </div>
+
+            <span>@(IsCollapsed("upload") ? "▶" : "▼")</span>
+
+        </div>
+
+        @if (!IsCollapsed("upload"))
+        {
+            <div class="card-body">
+
+                <div class="upload-zone">
+
+                    <InputFile OnChange="HandleFilesSelected"
+                               multiple
+                               class="form-control" />
+
+                    @if (selectedFiles.Any())
+                    {
+                        <div class="mt-3">
+
+                            <div class="fw-semibold mb-2">
+                                Fichiers sélectionnés :
+                            </div>
+
+                            <ul class="small text-muted mb-3">
+                                @foreach (var f in selectedFiles)
+                                {
+                                    <li>@f.Name</li>
+                                }
+                            </ul>
+
+                        </div>
+                    }
+
+                    <button class="btn btn-primary w-100"
+                            @onclick="UploadFiles"
+                            disabled="@(!selectedFiles.Any())">
+                        Envoyer les fichiers
+                    </button>
+
+                </div>
+
+            </div>
+        }
+
+    </div>
+
+    <!-- ================= DOCUMENTS ================= -->
+    <div class="card doc-card mb-3">
+
+        <div class="section-header" @onclick="ToggleDocuments">
+            <div class="d-flex align-items-center gap-2">
+                <span class="icon-circle">📁</span>
+                <div>
+                    <div class="fw-bold">Mes documents</div>
+                    <small class="text-muted">@documents.Count fichier(s)</small>
+                </div>
+            </div>
+
+            <span>@(IsCollapsed("docs") ? "▶" : "▼")</span>
+        </div>
+
+        @if (!IsCollapsed("docs"))
+        {
+            <div class="card-body">
+                @if (!documents.Any())
+                {
+                    <p class="text-muted">Aucun document disponible</p>
+                }
+                else
+                {
+                    <div class="row g-3">
+
+                        @foreach (var doc in documents)
+                        {
+                            <div class="col-12 col-md-6 col-lg-4">
+
+                                <div class="file-tile d-flex justify-content-between align-items-center">
+
+                                    <div class="d-flex align-items-center gap-2">
+
+                                        <div class="icon-circle">
+                                            📄
+                                        </div>
+
+                                        <div>
+                                            <div class="fw-semibold text-truncate" style="max-width:180px">
+                                                @doc.FileName
+                                            </div>
+                                            <small class="text-muted">
+                                                @doc.UploadedAt.ToString("dd/MM/yyyy")
+                                            </small>
+                                        </div>
+
+                                    </div>
+
+                                    <div class="d-flex gap-2">
+
+                                        <a class="btn btn-sm btn-outline-primary"
+                                        href="@doc.FilePath"
+                                        target="_blank">
+                                            Ouvrir
+                                        </a>
+
+                                        <button class="btn btn-sm btn-outline-danger"
+                                        @onclick="() => Delete(doc)">
+                                            🗑
+                                        </button>
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        }
+
+                    </div>
+                }
+            </div>
+        }
+
+    </div>
+
+    <!-- ================= QUITTANCES ================= -->
+    <div class="card doc-card">
+
+        <div class="section-header" @onclick="ToggleQuittances">
+            <div class="d-flex align-items-center gap-2">
+                <span class="icon-circle">💰</span>
+                <div>
+                    <div class="fw-bold">Mes quittances de loyer</div>
+                    <small class="text-muted">@quittances.Count document(s)</small>
+                </div>
+            </div>
+
+            <span>@(IsCollapsed("quittances") ? "▶" : "▼")</span>
+        </div>
+
+        @if (!IsCollapsed("quittances"))
+        {
+            <div class="card-body">
+
+                @if (!quittances.Any())
+                {
+                    <p class="text-muted">Aucune quittance disponible</p>
+                }
+                else
+                {
+                    <div class="row g-3">
+
+                        @foreach (var q in quittances)
+                        {
+                            <div class="col-12 col-md-6 col-lg-4">
+
+                                <div class="file-tile">
+
+                                    <div class="d-flex align-items-center gap-2">
+
+                                        <div class="icon-circle">
+                                            🧾
+                                        </div>
+
+                                        <div>
+                                            <div class="fw-semibold">@q.FileName</div>
+                                            <small class="text-muted">@q.MonthLabel</small>
+                                        </div>
+
+                                    </div>
+
+                                    <a class="btn btn-sm btn-primary w-100 mt-2"
+                                    href="@q.Url"
+                                    target="_blank">
+                                        Voir
+                                    </a>
+
+                                </div>
+
+                            </div>
+                        }
+
+                    </div>
+                }
+
+            </div>
+        }
+
+    </div>
+
+    <div class="card doc-card">
+
+        <!-- HEADER COLLAPSED -->
+        <div class="section-header" @onclick="ToggleAdminDocs">
+
+            <div class="d-flex align-items-center gap-2">
+
+                <span class="icon-circle">📂</span>
+
+                <div>
+                    <div class="fw-bold">Documents administratifs</div>
+                    <small class="text-muted">Bail & état des lieux</small>
+                </div>
+
+            </div>
+
+            <span>@(IsCollapsed("adminDocs") ? "▶" : "▼")</span>
+
+        </div>
+
+        @if (!IsCollapsed("adminDocs"))
+        {
+            <div class="card-body">
+
+                <!-- ================= ÉTAT DES LIEUX ================= -->
+                <div class="mb-4">
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+
+                        <div class="d-flex align-items-center gap-2 fw-semibold">
+                            <span>📄</span>
+                            État des lieux
+                        </div>
+
+                        <span class="badge badge-soft">
+                            @etatDesLieuxFiles.Count
+                        </span>
+
+                    </div>
+
+                    @if (!etatDesLieuxFiles.Any())
+                    {
+                        <div class="text-muted small">
+                            Aucun état des lieux disponible
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3">
+
+                            @foreach (var file in etatDesLieuxFiles)
+                            {
+                                <div class="col-12 col-md-6 col-lg-4">
+
+                                    <div class="file-tile">
+
+                                        <div class="d-flex align-items-center gap-2">
+
+                                            <div class="icon-circle">
+                                                📋
+                                            </div>
+
+                                            <div class="file-title">
+                                                @Path.GetFileName(file)
+                                            </div>
+
+                                        </div>
+
+                                        <a class="btn btn-sm btn-outline-warning w-100 mt-2"
+                                        href="@file"
+                                        target="_blank">
+                                            Ouvrir
+                                        </a>
+
+                                    </div>
+
+                                </div>
+                            }
+
+                        </div>
+                    }
+
+                </div>
+
+                <!-- ================= BAIL ================= -->
+                <div>
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+
+                        <div class="d-flex align-items-center gap-2 fw-semibold">
+                            <span>📑</span>
+                            Bail
+                        </div>
+
+                        <span class="badge badge-soft">
+                            @bailFiles.Count
+                        </span>
+
+                    </div>
+
+                    @if (!bailFiles.Any())
+                    {
+                        <div class="text-muted small">
+                            Aucun bail disponible
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3">
+
+                            @foreach (var file in bailFiles)
+                            {
+                                <div class="col-12 col-md-6 col-lg-4">
+
+                                    <div class="file-tile">
+
+                                        <div class="d-flex align-items-center gap-2">
+
+                                            <div class="icon-circle">
+                                                📄
+                                            </div>
+
+                                            <div class="file-title">
+                                                @Path.GetFileName(file)
+                                            </div>
+
+                                        </div>
+
+                                        <a class="btn btn-sm btn-outline-primary w-100 mt-2"
+                                        href="@file"
+                                        target="_blank">
+                                            Ouvrir
+                                        </a>
+
+                                    </div>
+
+                                </div>
+                            }
+
+                        </div>
+                    }
+
+                </div>
+
+            </div>
+        }
+
+    </div>
+}
+
+@code {
+
+    private Candidate? candidate;
+    private List<Document> documents = new();
+    private List<QuittanceVm> quittances = new();
+    private List<IBrowserFile> selectedFiles = new();
+
+    private bool isLoading = true;
+
+    private Dictionary<string, bool> collapsed = new();
+
+    // Documents importants pour le locataire
+    private List<string> etatDesLieuxFiles = new();
+    private List<string> bailFiles = new();
+
+
+    protected override async Task OnInitializedAsync()
+    { 
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        using var db = DbFactory.CreateDbContext();
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var email = auth.User.Identity?.Name;
+
+        if (!string.IsNullOrEmpty(email))
+        {
+            candidate = await db.Candidates
+                //.Where(c => c.OwnerId == ownerId)
+                .Include(x => x.Documents)
+                .FirstOrDefaultAsync(x => x.Email == email);
+
+            if (candidate != null)
+            {
+                await LoadDocuments();
+                await LoadQuittances();
+                await LoadAdminDocuments();
+            }
+        }
+
+        // 🔥 PLIÉ PAR DÉFAUT
+        collapsed["docs"] = true;
+        collapsed["quittances"] = true;
+        collapsed["adminDocs"] = true;
+        collapsed["upload"] = false;
+
+        isLoading = false;
+    }
+
+    // ================= LOAD DOCS =================
+    async Task LoadDocuments()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        using var db = DbFactory.CreateDbContext();
+
+        documents = db.Documents
+            .Where(d => d.CandidateId == candidate!.Id && d.OwnerId==ownerId)
+            .Select(d => new Document
+                {
+                    OwnerId=ownerId,
+                    Id = d.Id,
+                    FileName = d.FileName,
+                    FilePath = d.FilePath,
+                    UploadedAt = d.UploadedAt,
+
+                })
+            .ToList();
+    }
+
+    // ================= LOAD QUITTANCES =================
+    async Task LoadQuittances()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        if (candidate == null || ownerId == null)
+            return;
+
+        var safeFolder = $"{candidate!.FirstName}_{candidate.LastName}".Replace(" ", "_");
+
+        var basePath = Path.Combine(Env.WebRootPath, "uploads", "Candidates", ownerId, safeFolder, "Quittances_loyer");
+
+        if (!Directory.Exists(basePath))
+        {
+            quittances = new();
+            return;
+        }
+
+        quittances = Directory.GetFiles(basePath)
+            .Select(f => new QuittanceVm
+                {
+                    FileName = Path.GetFileName(f),
+                    Url = $"/uploads/Candidates/{ownerId}/{safeFolder}/Quittances_loyer/{Path.GetFileName(f)}",
+                    MonthLabel = Path.GetFileNameWithoutExtension(f)
+                })
+            .ToList();
+    }
+
+    async Task LoadAdminDocuments()
+    {
+        var email = candidate?.Email;
+        if (candidate == null) return;
+
+        // ⚠️ adapte si tu as ownerId ailleurs
+        var ownerId = candidate.OwnerId;
+
+        var folder = $"{candidate.FirstName}_{candidate.LastName}".Replace(" ", "_");
+
+        var basePath = Path.Combine(
+            "wwwroot",
+            "uploads",
+            "Tenants",
+            ownerId,
+            folder,
+            "DocumentsCommun"
+        );
+
+        var etatPath = Path.Combine(basePath, "EtatLieux");
+        var bailPath = Path.Combine(basePath, "Bail");
+
+        if (Directory.Exists(etatPath))
+        {
+            etatDesLieuxFiles = Directory.GetFiles(etatPath)
+                .Select(f => $"/uploads/Tenants/{ownerId}/{folder}/DocumentsCommun/EtatLieux/{Path.GetFileName(f)}")
+                .ToList();
+        }
+
+        if (Directory.Exists(bailPath))
+        {
+            bailFiles = Directory.GetFiles(bailPath)
+                .Select(f => $"/uploads/Tenants/{ownerId}/{folder}/DocumentsCommun/Bail/{Path.GetFileName(f)}")
+                .ToList();
+        }
+    }
+    // ================= TOGGLE =================
+    void ToggleQuittances()
+    {
+        Toggle("quittances");
+    }
+
+    void ToggleDocuments()
+    {
+        Toggle("docs");
+
+    }
+
+    void ToggleAdminDocs()
+    {
+        Toggle("adminDocs");
+    }
+
+    void ToggleUpload()
+    {
+        Toggle("upload");
+    }
+
+    void Toggle(string key)
+    {
+        if (!collapsed.ContainsKey(key))
+            collapsed[key] = true;
+
+        collapsed[key] = !collapsed[key];
+    }
+
+    bool IsCollapsed(string key)
+        => collapsed.ContainsKey(key) && collapsed[key];
+
+    // ================= UPLOAD =================
+    void HandleFilesSelected(InputFileChangeEventArgs e)
+    {
+        selectedFiles = e.GetMultipleFiles().ToList();
+    }
+
+    async Task UploadFiles()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        if (candidate == null || ownerId == null) return;
+
+        using var db = DbFactory.CreateDbContext();
+
+        var folder = $"{candidate.FirstName}_{candidate.LastName}".Replace(" ", "_");
+        var basePath = Path.Combine(Env.WebRootPath, "uploads", "Candidates", ownerId, folder);
+
+        if (!Directory.Exists(basePath))
+            Directory.CreateDirectory(basePath);
+
+        foreach (var file in selectedFiles)
+        {
+            var fileName = $"{Guid.NewGuid()}_{file.Name}";
+            var fullPath = Path.Combine(basePath, fileName);
+
+            await using var stream = new FileStream(fullPath, FileMode.Create);
+            await file.OpenReadStream(50 * 1024 * 1024).CopyToAsync(stream);
+
+            db.Documents.Add(new Document
+                {
+                    OwnerId = ownerId,   // 🔥 OBLIGATOIRE
+                    CandidateId = candidate.Id,
+                    FileName = file.Name,
+                    FilePath = $"/uploads/Candidates/{ownerId}/{folder}/{fileName}",
+                    UploadedAt = DateTime.Now
+                });
+        }
+
+        await db.SaveChangesAsync();
+
+        selectedFiles.Clear();
+
+        await LoadDocuments();
+    }
+
+    async Task Delete(Document doc)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var entity = await db.Documents.FindAsync(doc.Id);
+        if (entity == null) return;
+
+        db.Documents.Remove(entity);
+        await db.SaveChangesAsync();
+
+        await LoadDocuments();
+    }
+
+    // ================= VMs =================
+
+
+    class QuittanceVm
+    {
+        public string FileName { get; set; } = "";
+        public string Url { get; set; } = "";
+        public string MonthLabel { get; set; } = "";
+    }
+}

@@ -1,0 +1,392 @@
+﻿@page "/owners"
+@rendermode InteractiveServer
+@inject OwnerService OwnerService
+
+<h3 class="mb-4">🏢 Owners</h3>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+
+    <!-- ➕ BUTTON -->
+    <div>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            + Ajouter un Owner
+        </button>
+    </div>
+
+@*     <!-- 📊 KPI -->
+    <div class="d-flex gap-3 flex-wrap">
+
+        <div class="kpi-card">
+            <div class="kpi-label">Free</div>
+            <div class="kpi-value">@GetPlanCount("Free")</div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">Pro</div>
+            <div class="kpi-value">@GetPlanCount("Pro")</div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">Business</div>
+            <div class="kpi-value">@GetPlanCount("Business")</div>
+        </div>
+
+    </div> *@
+
+</div>
+
+<!-- 🔍 SEARCH -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+
+    <!-- 🔍 SEARCH -->
+    <div class="flex-grow-1" style="max-width: 420px;">
+        <input class="form-control"
+               placeholder="Rechercher par nom ou email..."
+               @bind="searchText"
+               @bind:event="oninput" />
+    </div>
+
+    <!-- 🎛 FILTERS -->
+    <!-- 🎛 FILTERS -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+
+        <!-- 📊 COUNT (GAUCHE) -->
+        <div class="text-muted">
+            @filteredOwnersCount owner(s)
+        </div>
+
+        <!-- 🎛 RIGHT FILTERS -->
+        <div class="d-flex gap-3 align-items-center">
+
+            <select class="form-select w-auto"
+                    @bind="statusFilter">
+                <option value="All">Tous statuts</option>
+                <option value="Active">Actifs</option>
+                <option value="Suspended">Suspendus</option>
+            </select>
+
+            <select class="form-select w-auto"
+                    @bind="planFilter">
+                <option value="All">Tous plans</option>
+                <option value="Free">Free</option>
+                <option value="Pro">Pro</option>
+                <option value="Business">Business</option>
+            </select>
+
+        </div>
+    </div>
+
+</div>
+
+<!-- LISTE OWNERS -->
+<div class="row g-4">
+
+    @foreach (var owner in owners
+        .Where(o =>
+        (string.IsNullOrWhiteSpace(searchText)
+        || o.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+        || o.Email.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+
+        && (statusFilter == "All"
+        || (statusFilter == "Active" && o.IsActive)
+        || (statusFilter == "Suspended" && !o.IsActive))
+
+        && (planFilter == "All"
+        || o.Plan.Equals(planFilter, StringComparison.OrdinalIgnoreCase))
+        ))
+    {
+        <div class="col-12" @key="owner.Id">
+
+            <div class="owner-card">
+
+                <!-- HEADER -->
+                <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center">
+
+                    <div>
+                        <div class="fw-bold">
+                            🏢 @owner.Name
+                        </div>
+
+                        <small class="text-muted">
+                            @owner.Email
+                        </small>
+
+                        <div class="mt-1">
+                            <span class="plan-badge @GetPlanClass(owner.Plan)">
+                                @owner.Plan
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-2">
+
+                        <span class="badge @(owner.IsActive ? "bg-success" : "bg-danger")">
+                            @(owner.IsActive ? "Active" : "Suspended")
+                        </span>
+
+                        <button class="btn btn-sm btn-light"
+                                @onclick="() => Toggle(owner.Id)">
+                            @(IsCollapsed(owner.Id) ? "▶" : "▼")
+                        </button>
+
+                    </div>
+
+                </div>
+
+                <!-- BODY -->
+                @if (!IsCollapsed(owner.Id))
+                {
+                    <div class="card-body">
+
+                        <div class="d-flex justify-content-between mb-3">
+
+                            <div>
+                                <div class="text-muted">Users</div>
+                                <div class="fw-bold">@GetStat(owner.Id).UsersCount</div>
+                            </div>
+
+                            <div>
+                                <div class="text-muted">Properties</div>
+                                <div class="fw-bold">@GetStat(owner.Id).PropertiesCount</div>
+                            </div>
+
+                            <div>
+                                <div class="text-muted">Plan</div>
+                                <div class="fw-bold">@owner.Plan</div>
+                            </div>
+
+                        </div>
+
+                        <div class="d-flex gap-2">
+
+                            <button class="btn btn-sm btn-outline-primary"
+                                    @onclick="() => ToggleStatus(owner.Id)">
+                                Toggle
+                            </button>
+
+                            <button class="btn btn-sm btn-outline-danger"
+                                    @onclick="() => ConfirmDelete(owner.Id)">
+                                Delete
+                            </button>
+
+                        </div>
+
+                    </div>
+                }
+
+            </div>
+
+        </div>
+    }
+
+</div>
+
+<!-- ===================== MODAL CREATE ===================== -->
+@if (showCreateModal)
+{
+    <div class="modal-backdrop fade show"></div>
+
+    <div class="modal show d-block">
+        <div class="modal-dialog">
+            <div class="modal-content">
+
+                <div class="modal-header">
+                    <h5 class="modal-title">Créer un Owner</h5>
+                    <button class="btn-close" @onclick="CloseCreate"></button>
+                </div>
+
+                <div class="modal-body">
+
+                    <input class="form-control mb-2"
+                           placeholder="Nom"
+                           @bind="newOwner.Name" />
+
+                    <input class="form-control mb-2"
+                           placeholder="Email"
+                           @bind="newOwner.Email" />
+
+                    <select class="form-control mb-2"
+                            @bind="newOwner.Plan">
+                        <option>Free</option>
+                        <option>Pro</option>
+                        <option>Business</option>
+                    </select>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseCreate">Annuler</button>
+                    <button class="btn btn-primary" @onclick="CreateOwner">Créer</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===================== MODAL DELETE ===================== -->
+@if (showDeleteModal)
+{
+    <div class="modal-backdrop fade show"></div>
+
+    <div class="modal show d-block">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmation</h5>
+                </div>
+
+                <div class="modal-body">
+                    <p>Supprimer cet owner ?</p>
+                </div>
+
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelDelete">Annuler</button>
+                    <button class="btn btn-danger" @onclick="DeleteConfirmed">Supprimer</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Owner> owners = new();
+    private Dictionary<string, OwnerStatsDto> Stats = new();
+
+    private string searchText = "";
+
+    // CREATE MODAL
+    private bool showCreateModal = false;
+    private Owner newOwner = new()
+        {
+            Plan = "Free",
+            IsActive = true
+        };
+
+    // DELETE MODAL
+    private bool showDeleteModal = false;
+    private string ownerToDeleteId;
+
+    private HashSet<string> collapsedOwners = new();
+
+    // FILTRES PLAN et STATUS
+    private string statusFilter = "All";
+    private string planFilter = "All";
+
+    private int filteredOwnersCount => owners
+    .Where(o =>
+        (string.IsNullOrWhiteSpace(searchText)
+            || o.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+            || o.Email.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+
+        && (statusFilter == "All"
+            || (statusFilter == "Active" && o.IsActive)
+            || (statusFilter == "Suspended" && !o.IsActive))
+
+        && (planFilter == "All"
+            || o.Plan.Equals(planFilter, StringComparison.OrdinalIgnoreCase))
+    )
+    .Count();
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private bool IsCollapsed(string id)
+        => collapsedOwners.Contains(id);
+
+    // ===================== CRUD =====================
+
+    private async Task Toggle(string id)
+    {
+        if (collapsedOwners.Contains(id))
+            collapsedOwners.Remove(id);
+        else
+            collapsedOwners.Add(id);
+    }
+
+    private async Task ToggleStatus(string id)
+    {
+        await OwnerService.ToggleStatus(id);
+        await Reload();
+    }
+
+    private OwnerStatsDto GetStat(string ownerId)
+    {
+        return Stats.TryGetValue(ownerId, out var stat)
+            ? stat
+            : new OwnerStatsDto();
+    }
+
+    // ===================== CREATE =====================
+
+    private void OpenCreate()
+    {
+        newOwner = new Owner { Plan = "Free", IsActive = true };
+        showCreateModal = true;
+    }
+
+    private void CloseCreate()
+    {
+        showCreateModal = false;
+    }
+
+    private async Task CreateOwner()
+    {
+        await OwnerService.Create(newOwner);
+        showCreateModal = false;
+        await Reload();
+    }
+
+    // ===================== DELETE =====================
+
+    private void ConfirmDelete(string id)
+    {
+        ownerToDeleteId = id;
+        showDeleteModal = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteModal = false;
+        ownerToDeleteId = null;
+    }
+
+    private async Task DeleteConfirmed()
+    {
+        await OwnerService.Delete(ownerToDeleteId);
+
+        showDeleteModal = false;
+        ownerToDeleteId = null;
+
+        await Reload();
+    }
+
+    // ===================== PLANS =====================
+
+    private string GetPlanClass(string plan)
+    {
+        return plan?.ToLower() switch
+        {
+            "free" => "plan-free",
+            "pro" => "plan-pro",
+            "business" => "plan-business",
+            _ => "plan-free"
+        };
+    }
+
+    // ===================== DATA OPTIMISÉ =====================
+
+    private async Task Reload()
+    {
+        owners = await OwnerService.GetAll();
+
+        var stats = await OwnerService.GetAllStats();
+
+        Stats = stats.ToDictionary(x => x.OwnerId, x => x);
+
+        collapsedOwners = owners.Select(o => o.Id).ToHashSet();
+    }
+}

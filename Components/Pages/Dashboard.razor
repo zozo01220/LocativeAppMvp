@@ -1,0 +1,297 @@
+﻿@page "/dashboard"
+@rendermode InteractiveServer
+
+@using LocativeApp.Data
+@using Microsoft.EntityFrameworkCore
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+@inject IJSRuntime JS
+
+<h3 class="mb-4">
+    📊 Dashboard
+</h3>
+
+@if (isLoading)
+{
+    <p>Chargement...</p>
+}
+else
+{
+    <!-- KPIs -->
+    <div class="row justify-content-center text-center">
+
+        <!-- BIENS OCCUPÉS -->
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3">
+                <h6 class="text-muted">Biens occupés</h6>
+                <h2 class="fw-bold">@occupiedProperties / @totalProperties</h2>
+            </div>
+        </div>
+
+        <!-- TAUX D'OCCUPATION -->
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3">
+                <h6 class="text-muted">Taux d’occupation global</h6>
+                <h2 class="fw-bold">@($"{occupancyRate:F0}%")</h2>
+
+                <div class="progress mt-2">
+                    @{
+                        var color =
+                        occupancyRate >= 70 ? "bg-success" :
+                        occupancyRate >= 30 ? "bg-warning" :
+                        "bg-danger";
+                    }
+
+                    <div class="progress-bar @color"
+                         style="width:@occupancyRate%">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- REVENUS MENSUELS -->
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3">
+                <h6 class="text-muted">Revenus mensuels</h6>
+                <h2 class="fw-bold">@($"{monthlyRevenue:N0} €")</h2>
+            </div>
+        </div>
+
+        <!-- TOTAL IMPAYES -->
+        <div class="col-12 col-md-3 mb-3">
+            <div class="card shadow-sm p-3">
+                <h6 class="text-muted">Total impayés</h6>
+                <h2 class="fw-bold text-danger">@($"{totalUnpaid:N0} €")</h2>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- REVENUS CHART -->
+    <div class="card shadow-sm p-3 mb-4">
+        <h6 class="mb-3">📈 Revenus mensuels</h6>
+
+        <canvas id="revenueChart" height="100"></canvas>
+    </div>
+
+    <!-- TABLEAU BIENS -->
+    <div class="card p-3 shadow-sm">
+        <h6 class="mb-3">🏢 Détail des biens</h6>
+
+        <div class="row g-2">
+
+            @foreach (var p in properties)
+            {
+                var occupancy = GetOccupancyRate(p);
+                var isOccupied = p.LeaseContracts?.Any(l => l.EndDate == null) == true;
+
+                <div class="col-12 col-md-6 col-lg-4">
+
+                    <div class="border rounded p-2 h-100 position-relative">
+
+                        <!-- 🔥 BADGE MEUBLÉ -->
+                        @if (p.IsFurnished)
+                        {
+                            <span class="badge bg-info position-absolute top-0 end-0 m-2">
+                                🛋️ Meublé
+                            </span>
+                        }
+
+                        <!-- 🔥 TYPE + SURFACE -->
+                        <div class="fw-semibold small">
+                            @p.PropertyType?.Name @(p.Surface.HasValue ? p.Surface.Value : 0) m²
+                        </div>
+
+                        <!-- 🔥 ADRESSE -->
+                        <div class="text-muted" style="font-size:0.75rem;">
+                            @p.Address, @p.PostalCode @p.City
+                        </div>
+
+                        <!-- 🔥 STATUT + LOYER -->
+                        <div class="d-flex justify-content-between align-items-center mt-2">
+
+                            @if (isOccupied)
+                            {
+                                <span class="badge bg-warning text-dark">Occupé</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Libre</span>
+                            }
+
+                            <span class="fw-bold">
+                                @($"{p.RentAmount:N0} €")
+                            </span>
+
+                        </div>
+
+                        <!-- 🔥 OCCUPATION -->
+                        <div class="mt-2">
+
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>Taux d'occupation</span>
+                                <span>@occupancy%</span>
+                            </div>
+
+                            <div class="progress" style="height:6px;">
+                                <div class="progress-bar bg-success"
+                                     style="@($"width:{occupancy}%")">
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            }
+
+        </div>
+    </div>
+}
+@code {
+
+    List<Property> properties = new();
+
+    bool isLoading = true;
+
+    int totalProperties;
+    int occupiedProperties;
+    double occupancyRate;
+    double globalOccupancy;
+    decimal monthlyRevenue;
+    decimal totalUnpaid;
+    List<string> revenueLabels = new();
+    List<decimal> revenueValues = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    async Task Load()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        using var db = DbFactory.CreateDbContext();
+
+        properties = db.Properties
+            .Where(p => p.OwnerId == ownerId)
+            .Include(p => p.LeaseContracts)
+                .ThenInclude(l => l.Tenant)
+            .Include(p => p.CandidateList)
+            .Include(p => p.PropertyType)
+            .Include(p => p.PropertyFeatures)
+                .ThenInclude(pf => pf.Feature)
+            .AsNoTracking()
+            .ToList();
+
+        var payments = await db.RentPayments
+            .Where(p => p.OwnerId == ownerId)
+            .ToListAsync();
+
+        totalProperties = properties.Count;
+
+        // 🔥 BIENS OCCUPÉS (contrat actif)
+        occupiedProperties = properties.Count(p =>
+            p.LeaseContracts.Any(l => l.EndDate == null));
+
+        // 🔥 Occupation gloable (moyenne de tous les biens)
+        globalOccupancy = properties.Count == 0
+            ? 0
+            : Math.Round(properties.Average(p => GetOccupancyRate(p)), 0);
+
+        // 🔥 TAUX D'OCCUPATION GLOBAL
+        occupancyRate = totalProperties == 0
+            ? 0
+            : (occupiedProperties * 100.0 / totalProperties);
+
+        // 🔥 REVENUS MENSUELS (contrats actifs)
+        monthlyRevenue = properties
+            .Where(p => p.LeaseContracts.Any(l => l.EndDate == null))
+            .Sum(p => p.RentAmount ?? 0);
+
+        // 🔥 IMPAYES
+        totalUnpaid = payments
+            .Where(p => !p.IsPaid)
+            .Sum(p => p.AmountPaid);
+
+        isLoading = false;
+
+        // 🔥 DATA CHART REVENUS (12 derniers mois)
+        var now = DateTime.Now;
+
+        var last12Months = Enumerable.Range(0, 12)
+            .Select(i => now.AddMonths(-i))
+            .OrderBy(x => x)
+            .ToList();
+
+        revenueLabels = new();
+        revenueValues = new();
+
+        foreach (var month in last12Months)
+        {
+            var total = payments
+                .Where(p => p.IsPaid
+                    && p.Year == month.Year
+                    && p.Month == month.Month)
+                .Sum(p => p.AmountPaid);
+
+            revenueLabels.Add($"{month:MM/yyyy}");
+            revenueValues.Add(total);
+        }
+    }
+
+    double GetOccupancyRate(Property p)
+    {
+        if (p.AcquisitionDate == null)
+            return 0;
+
+        var start = p.AcquisitionDate.Value.Date;
+        var end = DateTime.Today;
+
+        var totalDays = Math.Max((end - start).TotalDays, 1);
+
+        double rentedDays = 0;
+
+        if (p.LeaseContracts == null)
+            return 0;
+
+        foreach (var lease in p.LeaseContracts)
+        {
+            var leaseStart = lease.StartDate.Date;
+            var leaseEnd = lease.EndDate?.Date ?? DateTime.Today;
+
+            var effectiveStart = leaseStart < start ? start : leaseStart;
+            var effectiveEnd = leaseEnd > end ? end : leaseEnd;
+
+            if (effectiveEnd > effectiveStart)
+            {
+                rentedDays += (effectiveEnd - effectiveStart).TotalDays;
+            }
+        }
+
+        return Math.Round((rentedDays / totalDays) * 100, 0);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // on attend que les données soient bien chargées
+            await Task.Delay(200);
+
+            if (revenueLabels != null && revenueValues != null && revenueLabels.Any())
+            {
+                await JS.InvokeVoidAsync(
+                    "renderRevenueChart",
+                    revenueLabels,
+                    revenueValues
+                );
+            }
+        }
+    }
+}

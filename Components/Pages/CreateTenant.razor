@@ -1,0 +1,82 @@
+﻿@page "/create-tenant"
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+@inject IEmailService EmailService
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Identity
+
+@using LocativeApp.Data
+
+<h3>Créer un locataire</h3>
+
+<input placeholder="Nom" @bind="LastName" />
+<br />
+<input placeholder="Prénom" @bind="FirstName" />
+<br />
+<input placeholder="Email" @bind="Email" />
+<br />
+<input placeholder="Téléphone" @bind="Phone" />
+<br />
+
+<button @onclick="Create">Créer</button>
+
+<p>@Message</p>
+
+@code {
+    string FirstName;
+    string LastName;
+    string Email;
+    string Phone;
+
+    string Message;
+
+    async Task Create()
+    {
+        var password = GeneratePassword();
+
+        var user = new ApplicationUser
+            {
+                UserName = Email,
+                Email = Email,
+                FirstName = FirstName,
+                LastName = LastName,
+                PhoneNumber = Phone
+            };
+
+        var result = await UserManager.CreateAsync(user, password);
+
+        if (result.Succeeded)
+        {
+            await UserManager.AddToRoleAsync(user, "Tenant");
+
+            var loginUrl = Nav.BaseUri + "Identity/Account/Login";
+
+            var body = $@"
+Bonjour {FirstName},
+
+Votre compte locataire a été créé.
+
+Identifiant : {Email}
+Mot de passe : {password}
+
+Connectez-vous ici :
+{loginUrl}
+
+Merci de déposer vos documents.
+";
+
+            await EmailService.SendAsync(Email, "Création de votre compte locataire", body);
+
+            Message = "Locataire créé + email envoyé";
+        }
+        else
+        {
+            Message = "Erreur création utilisateur";
+        }
+    }
+
+    string GeneratePassword()
+    {
+        return "Loc@" + Guid.NewGuid().ToString("N")[..8];
+    }
+}

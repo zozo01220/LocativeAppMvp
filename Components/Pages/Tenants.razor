@@ -1,0 +1,923 @@
+﻿@page "/tenants"
+@rendermode InteractiveServer
+
+@using LocativeApp.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Authorization
+@using QuestPDF.Fluent
+@using QuestPDF.Helpers
+@using QuestPDF.Infrastructure
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject LocativeApp.Services.RentService RentService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+@* <h3 class="mb-4">
+    <i class="bi bi-person-vcard-fill me-2"></i>
+    Locataires
+</h3> *@
+<div class="d-flex justify-content-between align-items-center mb-4">
+
+    <h3 class="mb-0">
+        <i class="bi bi-person-vcard-fill me-2"></i>
+        Locataires
+    </h3>
+    <div class="btn-group">
+
+        <button class="btn btn-outline-secondary @(tenantFilter == "all" ? "active" : "")"
+                @onclick='() => tenantFilter = "all"'>
+            Tous
+        </button>
+
+        <button class="btn btn-outline-secondary @(tenantFilter == "active" ? "active" : "")"
+                @onclick='() => tenantFilter = "active"'>
+            Actifs
+        </button>
+
+        <button class="btn btn-outline-secondary @(tenantFilter == "inactive" ? "active" : "")"
+                @onclick='() => tenantFilter = "inactive"'>
+            Inactifs
+        </button>
+
+    </div>
+</div>
+
+@* @{
+    var activeTenants = properties?.Where(p => p.Tenant != null && p.Tenant.IsActive).ToList() ?? new();
+    var inactiveTenants = properties?.Where(p => p.Tenant != null && !p.Tenant.IsActive).ToList() ?? new();
+} *@
+
+<style>
+    .fade-message {
+        animation: fadeOut 3s forwards;
+    }
+
+    @@keyframes fadeOut {
+        0% {
+            opacity: 1;
+        }
+
+        80% {
+            opacity: 1;
+        }
+
+        100% {
+            opacity: 0;
+        }
+    }
+
+    .bg-orange-dark {
+        background-color: #ff8c00 !important;
+    }
+
+    .group-header {
+        cursor: pointer;
+        padding: 10px;
+        border-radius: 10px;
+        background: #f8f9fa;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        user-select: none;
+    }
+
+        .group-header:hover {
+            background: #eef1f5;
+        }
+</style>
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success fade-message">@successMessage</div>
+}
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (properties == null)
+{
+    <p>Chargement...</p>
+}
+else
+{
+
+    <!-- 🟢 ACTIFS -->
+    @if (showActive)
+    {
+        <div class="row mb-4">
+
+            @foreach (var p in GetFilteredProperties())
+            {
+                <div class="col-12 col-sm-6 col-lg-4 mb-3">
+
+                    <div class="card tenant-card h-100 shadow-sm">
+
+                        <!-- IMAGE -->
+                        <div class="position-relative">
+
+                            <!-- MENU 3 POINTS -->
+                            @{
+                                var activeLease = p.LeaseContracts?
+                                .FirstOrDefault(l => l.EndDate == null);
+
+                                var tenant = activeLease?.Tenant;
+                            }
+
+                            <div class="position-relative">
+
+                                @if (!string.IsNullOrEmpty(p.MainPhotoPath))
+                                {
+                                    <img src="@p.MainPhotoPath" class="card-img-top tenant-img" />
+                                }
+                                else
+                                {
+                                    <div class="tenant-img placeholder d-flex align-items-center justify-content-center">
+                                        <span>Pas d'image</span>
+                                    </div>
+                                }
+
+                                @if (tenant != null)
+                                {
+                                    <!-- 🔥 BOUTON EDITION FLOTTANT -->
+                                    <button class="btn btn-light btn-sm rounded-circle shadow position-absolute"
+                                            style="bottom:10px; right:10px; width:35px; height:35px;"
+                                            @onclick="() => EditTenant(tenant)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                }
+
+                            </div>
+
+                            @if (tenant != null)
+                            {
+                                <div class="position-absolute top-0 end-0 m-2 dropdown">
+
+                                    <button class="btn btn-light btn-sm rounded-circle shadow-sm"
+                                            data-bs-toggle="dropdown">
+                                        <i class="bi bi-three-dots"></i>
+                                    </button>
+
+                                    <ul class="dropdown-menu dropdown-menu-end">
+
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => Toggle(tenant)">
+                                                🔄 Activer / Désactiver
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => OpenUpload(tenant, UploadType.LeaseAgreement)">
+                                                📤 Importer bail
+                                            </button>
+                                        </li>
+
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => OpenUpload(tenant, UploadType.PropertyReport)">
+                                                📤 Importer état des lieux
+                                            </button>
+                                        </li>
+                                    </ul>
+
+                                </div>
+                            }
+                        </div>
+
+                        <!-- BODY -->
+                        <div class="card-body p-3">
+
+                            <div class="text-muted mb-1" style="font-size: 0.8rem;">
+                                @p.ResidentialComplex
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+
+                                <div class="d-flex justify-content-between align-items-start">
+
+                                    <!-- TITRE COMPACT -->
+                                    <div class="flex-grow-1">
+                                        <div>
+                                            <h6 class="mb-1 fw-bold">
+                                                @p.PropertyType?.Name @(p.Surface.HasValue ? p.Surface.Value : 0) m²
+                                            </h6>
+
+                                            @if (p.IsFurnished)
+                                            {
+                                                <span class="badge bg-info">
+                                                    🛋️ Meublé
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-light text-dark border">
+                                                    🚫 Non meublé
+                                                </span>
+                                            }
+                                        </div>
+                                        <div class="text-muted small">
+                                            @p.Address, @p.PostalCode @p.City
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                                @{
+                                    activeLease = p.LeaseContracts?
+                                    .FirstOrDefault(l => l.EndDate == null);
+
+                                    tenant = activeLease?.Tenant;
+                                }
+
+                                @if (tenant != null)
+                                {
+                                    <span class="badge @(tenant.IsActive ? "bg-success" : "bg-danger")">
+                                        @(tenant.IsActive ? "Actif" : "Inactif")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">
+                                        Libre
+                                    </span>
+                                }
+
+                            </div>
+
+                            <div class="mb-2">
+                                <span class="fw-semibold">
+                                    👤 @tenant.FirstName @tenant.LastName
+                                </span>
+
+                                <div class="text-muted small">
+                                    <i class="bi bi-envelope me-1"></i> @tenant.Email <br />
+                                    <i class="bi bi-phone me-1"></i> @tenant.Phone
+                                </div>
+                            </div>
+
+                            <div class="progress mb-2">
+                                <div class="progress-bar @(double.Parse(GetPercent(tenant.Id)) >= 100 ? "bg-success" : "bg-warning")"
+                                     style="width:@GetPercent(tenant.Id)%">
+                                    Taux de paiement : @GetPercent(tenant.Id)%
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            }
+
+        </div>
+    }
+
+    <!-- ⚫ INACTIFS -->
+    @if (showInactive)
+    {
+        <div class="row">
+
+            @foreach (var p in GetFilteredProperties())
+            {
+                 var activeLease = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null);
+
+                var tenant = activeLease?.Tenant;
+
+                <div class="col-12 col-sm-6 col-lg-4 mb-3">
+
+                    <div class="card tenant-card h-100 shadow-sm">
+
+                        <div class="position-relative">
+
+                            @if (!string.IsNullOrEmpty(p.MainPhotoPath))
+                            {
+                                <img src="@p.MainPhotoPath" class="card-img-top tenant-img" />
+                            }
+                            else
+                            {
+                                <div class="tenant-img placeholder d-flex align-items-center justify-content-center">
+                                    <span>Pas d'image</span>
+                                </div>
+                            }
+
+                            <span class="badge bg-danger position-absolute top-0 start-0 m-2">
+                                Inactif
+                            </span>
+
+                            <!-- STATUS LOCATAIRE -->
+                            @if (tenant != null)
+                            {
+                                <span class="badge position-absolute top-0 start-0 m-2 @(tenant.IsActive ? "bg-success" : "bg-danger")">
+                                    @(tenant.IsActive ? "Actif" : "Inactif")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary position-absolute top-0 start-0 m-2">
+                                    Libre
+                                </span>
+                            }
+
+                            <!-- MENU 3 POINTS -->
+                            @if (tenant != null)
+                            {
+                                <div class="position-absolute top-0 end-0 m-2 dropdown">
+
+                                    <button class="btn btn-light btn-sm rounded-circle shadow-sm"
+                                            data-bs-toggle="dropdown">
+                                        <i class="bi bi-three-dots"></i>
+                                    </button>
+
+                                    <ul class="dropdown-menu dropdown-menu-end">
+
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => Toggle(tenant)">
+                                                🔄 Activer / Désactiver
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => OpenUpload(tenant, UploadType.LeaseAgreement)">
+                                                📤 Importer bail
+                                            </button>
+                                        </li>
+
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    @onclick="() => OpenUpload(tenant, UploadType.PropertyReport)">
+                                                📤 Importer état des lieux
+                                            </button>
+                                        </li>
+                                    </ul>
+
+                                </div>
+                            }
+                        </div>
+
+                        <div class="card-body p-3">
+
+                            <div class="d-flex justify-content-between align-items-start">
+
+                                <!-- TITRE COMPACT -->
+                                <div class="flex-grow-1">
+
+                                    <div class="mb-1 fw-semibold">
+                                        @p.PropertyType?.Name @(p.Surface.HasValue ? p.Surface.Value : 0) m²
+                                    </div>
+
+                                    <div class="text-muted small">
+                                        @p.Address, @p.PostalCode @p.City
+                                    </div>
+
+                                </div>
+
+                                <!-- 🛋️ MEUBLÉ (en haut à droite du bloc texte) -->
+                                @if (p.IsFurnished)
+                                {
+                                    <span class="badge bg-info ms-2">
+                                        🛋️
+                                    </span>
+                                }
+
+                            </div>
+
+                            <div class="mb-2">
+                                <span class="fw-semibold">
+                                    👤 @tenant.FirstName @tenant.LastName
+                                </span>
+
+                                <div class="text-muted small">
+                                    📧 @tenant.Email <br />
+                                    📞 @tenant.Phone
+                                </div>
+
+                                <div class="progress mb-2">
+                                    <div class="progress-bar @(double.Parse(GetPercent(tenant.Id)) >= 100 ? "bg-success" : "bg-warning")"
+                                         style="width:@GetPercent(tenant.Id)%">
+                                        Taux de paiement : @GetPercent(tenant.Id)%
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            }
+
+        </div>
+
+    }
+
+    <InputFile @ref="fileInputLeaseAgreement"
+               class="d-none"
+               OnChange="@(async e => await HandleFileSelectedLeaseAgreement(e))" />
+
+    <InputFile @ref="fileInputPropertyReport"
+               class="d-none"
+               OnChange="@(async e => await HandleFileSelectedPropertyReport(e))" />
+}
+
+@if (showEditModal)
+{
+    <div class="modal fade show d-block" style="background:rgba(0,0,0,0.5)">
+
+        <div class="modal-dialog">
+            <div class="modal-content p-3">
+
+                <h5 class="mb-3">✏️ Modifier locataire</h5>
+
+                <input class="form-control mb-2"
+                       placeholder="Prénom"
+                       @bind="editTenant.FirstName" />
+
+                <input class="form-control mb-2"
+                       placeholder="Nom"
+                       @bind="editTenant.LastName" />
+
+                <input class="form-control mb-2"
+                       placeholder="Email"
+                       @bind="editTenant.Email" />
+
+                <input class="form-control mb-2"
+                       placeholder="Téléphone"
+                       @bind="editTenant.Phone" />
+
+                <div class="row">
+                    <div class="col">
+                        <label class="small text-muted">Début</label>
+                        <input type="date" class="form-control"
+                               @bind="editTenant.StartDate" />
+                    </div>
+
+                    <div class="col">
+                        <label class="small text-muted">Fin</label>
+                        <input type="date" class="form-control"
+                               @bind="editTenant.EndDate" />
+                    </div>
+                </div>
+
+                <div class="form-check form-switch mt-2">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           @bind="editTenant.IsActive" />
+                    <label class="form-check-label">
+                        Actif
+                    </label>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2 mt-3">
+
+                    <button class="btn btn-secondary btn-sm"
+                            @onclick="() => showEditModal = false">
+                        Annuler
+                    </button>
+
+                    <button class="btn btn-primary btn-sm"
+                            @onclick="SaveTenant">
+                        Enregistrer
+                    </button>
+
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+}
+
+@code {
+
+    private enum UploadType
+    {
+        LeaseAgreement,
+        PropertyReport
+    }
+
+    private UploadType currentUploadType;
+
+    List<Property> properties;
+
+    string errorMessage = "";
+    string successMessage = "";
+
+    bool showSuccessMessage = false;
+
+    DateTime startDate;
+    DateTime endDate;
+
+    Dictionary<int, List<RentPayment>> paymentsCache = new();
+    Dictionary<int, double> percentCache = new();
+
+    // Filtre de visibilité
+    string tenantFilter = "active"; // all - active - inactive
+    
+    // Plier déplier par défaut
+    bool showActive = true;
+    bool showInactive = false;
+
+    // Upload fichiers
+    private InputFile? fileInputLeaseAgreement;
+	private InputFile? fileInputPropertyReport;
+	private InputFile? fileInput;
+    private ElementReference fileElement;
+
+    private Tenant? selectedTenant;
+    private Tenant editTenant = new();
+    private bool showEditModal = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+
+        var now = DateTime.Now;
+        var firstDayLastMonth = new DateTime(now.Year, now.Month, 1).AddMonths(-1);
+        startDate = firstDayLastMonth;
+        endDate = firstDayLastMonth.AddMonths(1).AddDays(-1);
+    }
+
+    async Task Load()
+    {
+        try
+        {
+            using var db = DbFactory.CreateDbContext();
+
+            var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+            properties = await db.Properties
+                .Where(c => c.OwnerId == ownerId)
+                .Include(p => p.LeaseContracts)
+                    .ThenInclude(l => l.Tenant)
+                .Include(p => p.PropertyType)   // 🔥 AJOUT IMPORTANT
+                .Include(p => p.PropertyFeatures)
+                    .ThenInclude(pf => pf.Feature) // 🔥 si tu affiches les features côté UI
+                .AsNoTracking()
+                .ToListAsync();
+
+            paymentsCache.Clear();
+            percentCache.Clear();
+
+            foreach (var p in properties)
+            {
+                var lease = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null);
+
+                if (lease?.Tenant == null)
+                    continue;
+
+                var tenantId = lease.Tenant.Id;
+
+                var payments = await RentService.GetPaymentsAsync(tenantId);
+
+                var months = payments
+                    .Select(x => new DateTime(x.Year, x.Month, 1))
+                    .ToList();
+
+                int total = months.Count;
+                int paid = payments.Count(x => x.IsPaid);
+
+                paymentsCache[tenantId] = payments;
+                percentCache[tenantId] = total == 0 ? 0 : (paid * 100.0 / total);
+            }
+
+
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    async Task ShowMessage(string text)
+    {
+        successMessage = text;
+        showSuccessMessage = true;
+
+        await InvokeAsync(StateHasChanged);
+
+        await Task.Delay(3000);
+
+        showSuccessMessage = false;
+        successMessage = "";
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenUpload(Tenant tenant, UploadType type)
+    {
+        selectedTenant = tenant;
+        currentUploadType = type;
+
+        await JS.InvokeVoidAsync("triggerFile", fileElement);
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null || selectedTenant == null) return;
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        var folder = $"{selectedTenant.FirstName}_{selectedTenant.LastName}".Replace(" ", "_");
+
+        var subFolder = currentUploadType switch
+        {
+            UploadType.LeaseAgreement => "Bail",
+            UploadType.PropertyReport => "EtatLieux",
+            _ => "Documents"
+        };
+
+        var path = Path.Combine(
+            Env.WebRootPath,
+            "uploads",
+            "Tenants",
+            ownerId,
+            folder,
+            "DocumentsCommun",
+            subFolder
+        );
+
+        Directory.CreateDirectory(path);
+
+        var filePath = Path.Combine(path, file.Name);
+
+        await using var stream = new FileStream(filePath, FileMode.Create);
+        await file.OpenReadStream(50 * 1024 * 1024).CopyToAsync(stream);
+
+        await ShowMessage("Upload terminé ✔");
+    }
+
+    private async Task HandleFileSelectedLeaseAgreement(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null || selectedTenant == null) return;
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        var folder = $"{selectedTenant.FirstName}_{selectedTenant.LastName}".Replace(" ", "_");
+
+        var path = Path.Combine(
+            Env.WebRootPath,
+            "uploads",
+            "Tenants",
+            ownerId,
+            folder,
+            "DocumentsCommun",
+            "Bail"
+        );
+
+        Directory.CreateDirectory(path);
+
+        var filePath = Path.Combine(path, file.Name);
+
+        await using var stream = new FileStream(filePath, FileMode.Create);
+        await file.OpenReadStream(50 * 1024 * 1024).CopyToAsync(stream);
+
+        await ShowMessage("Import du bail terminé ✔");
+    }
+
+    private async Task HandleFileSelectedPropertyReport(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null || selectedTenant == null) return;
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        var folder = $"{selectedTenant.FirstName}_{selectedTenant.LastName}".Replace(" ", "_");
+
+        var path = Path.Combine(
+            Env.WebRootPath,
+            "uploads",
+            "Tenants",
+            ownerId,
+            folder,
+            "DocumentsCommun",
+            "EtatLieux"
+        );
+
+        Directory.CreateDirectory(path);
+
+        var filePath = Path.Combine(path, file.Name);
+
+        await using var stream = new FileStream(filePath, FileMode.Create);
+        await file.OpenReadStream(50 * 1024 * 1024).CopyToAsync(stream);
+
+        await ShowMessage("Import de l'état des lieux terminé ✔");
+    }
+
+    private async Task OpenUploadPropertyReport(Tenant tenant)
+    {
+        selectedTenant = tenant;
+
+        await JS.InvokeVoidAsync("eval", @"
+        document.querySelector('input[type=file]').click();");
+    }
+
+    private async Task OpenUploadLeaseAgreement(Tenant tenant)
+    {
+        selectedTenant = tenant;
+
+        await JS.InvokeVoidAsync("eval", @"
+        document.querySelector('input[type=file]').click();");
+    }
+
+    List<Property> GetFilteredProperties()
+    {
+        if (properties == null) return new();
+
+        return tenantFilter switch
+        {
+            "active" => properties.Where(p =>
+            {
+                var tenant = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null)?
+                    .Tenant;
+
+                return tenant != null && tenant.IsActive;
+            }).ToList(),
+
+            "inactive" => properties.Where(p =>
+            {
+                var tenant = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null)?
+                    .Tenant;
+
+                return tenant != null && !tenant.IsActive;
+            }).ToList(),
+
+            _ => properties.Where(p =>
+            {
+                var tenant = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null)?
+                    .Tenant;
+
+                return tenant != null;
+            }).ToList()
+        };
+    }
+
+    List<Property> GetFilteredTenants(bool active)
+    {
+        if (properties == null) return new();
+
+        return properties
+            .Where(p =>
+            {
+                var tenant = p.LeaseContracts?
+                    .FirstOrDefault(l => l.EndDate == null)?
+                    .Tenant;
+
+                return tenant != null && tenant.IsActive == active;
+            })
+            .ToList();
+    }
+
+    async Task Toggle(Tenant t)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var entity = await db.Tenants.FirstOrDefaultAsync(x => x.Id == t.Id);
+
+        if (entity != null)
+        {
+            entity.IsActive = !entity.IsActive;
+            await db.SaveChangesAsync();
+        }
+
+        // 🔥 IMPORTANT : recrée complètement la liste
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        properties = await db.Properties
+            .Where(c => c.OwnerId == ownerId)
+            .Include(p => p.LeaseContracts).ThenInclude(l => l.Tenant)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // 🔥 force UI refresh synchronisé Blazor
+        await InvokeAsync(StateHasChanged);
+
+        await ShowMessage(entity.IsActive ? "Locataire activé" : "Locataire désactivé");
+    }
+
+    string GetPercent(int tenantId)
+    {
+        return percentCache.TryGetValue(tenantId, out var value)
+            ? value.ToString("0")
+            : "0";
+    }
+
+    int GetPaid(int tenantId)
+    {
+        return paymentsCache.TryGetValue(tenantId, out var list)
+            ? list.Count(x => x.IsPaid)
+            : 0;
+    }
+
+    int GetUnpaid(int tenantId, DateTime createdAt)
+    {
+        if (!paymentsCache.TryGetValue(tenantId, out var list))
+            return 0;
+
+        return list.Count(x => !x.IsPaid);
+    }
+
+    async Task GenerateQuittance(Property p, DateTime period)
+    {
+        var lease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+        var tenant = lease?.Tenant;
+
+        if (tenant == null)
+            return;
+
+        var folderName = $"{tenant.FirstName}_{tenant.LastName}";
+        var basePath = Path.Combine(Env.WebRootPath, "uploads", "Candidates", folderName, "Quittances_loyer");
+
+        if (!Directory.Exists(basePath))
+            Directory.CreateDirectory(basePath);
+
+        var fileName = $"Quittance_{period:yyyy_MM}.pdf";
+        var fullPath = Path.Combine(basePath, fileName);
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Margin(30);
+
+                page.Content().Column(col =>
+                {
+                    col.Item().Text("QUITTANCE DE LOYER").FontSize(20).Bold();
+                    col.Item().Text($"Période : {period:MM/yyyy}");
+                    col.Item().Text($"Locataire : {tenant.FirstName} {tenant.LastName}");
+                    col.Item().Text($"Bien : {p.Title}");
+                    col.Item().Text($"Adresse : {p.Address}");
+                    col.Item().Text(" ");
+                    col.Item().Text($"Loyer : {p.RentAmount}");
+                    col.Item().Text($"Charges : {p.ChargesAmount}");
+                    col.Item().Text(" ");
+                    col.Item().Text("Signature : ____________________");
+                });
+            });
+        });
+
+        document.GeneratePdf(fullPath);
+    }
+
+    private void EditTenant(Tenant t)
+    {
+        editTenant = new Tenant
+            {
+                Id = t.Id,
+                FirstName = t.FirstName,
+                LastName = t.LastName,
+                Email = t.Email,
+                Phone = t.Phone,
+                StartDate = t.StartDate,
+                EndDate = t.EndDate,
+                IsActive = t.IsActive,
+                OwnerId = t.OwnerId
+            };
+
+        showEditModal = true;
+    }
+
+    private async Task SaveTenant()
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var entity = await db.Tenants.FirstOrDefaultAsync(x => x.Id == editTenant.Id);
+
+        if (entity == null) return;
+
+        entity.FirstName = editTenant.FirstName;
+        entity.LastName = editTenant.LastName;
+        entity.Email = editTenant.Email;
+        entity.Phone = editTenant.Phone;
+        entity.StartDate = editTenant.StartDate;
+        entity.EndDate = editTenant.EndDate;
+        entity.IsActive = editTenant.IsActive;
+
+        await db.SaveChangesAsync();
+
+        showEditModal = false;
+
+        await Load();
+
+        successMessage = "Locataire modifié avec succès ✔";
+    }
+}

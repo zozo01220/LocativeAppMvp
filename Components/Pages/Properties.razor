@@ -1,0 +1,1365 @@
+﻿@page "/properties"
+@rendermode InteractiveServer
+
+@using LocativeApp.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject CurrentOwnerService CurrentOwnerService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IWebHostEnvironment Env
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h3 class="mb-4">
+        <i class="bi bi-house-door-fill me-2"></i>
+        Biens
+    </h3>
+    <!-- FILTRES -->
+    <div class="btn-group mb-0">
+        <button class="btn btn-outline-secondary @(tenantFilter == "all" ? "active" : "")"
+                @onclick='() => tenantFilter = "all"'>
+            Tous
+        </button>
+
+        <button class="btn btn-outline-secondary @(tenantFilter == "active" ? "active" : "")"
+                @onclick='() => tenantFilter = "active"'>
+            Actifs
+        </button>
+
+        <button class="btn btn-outline-secondary @(tenantFilter == "inactive" ? "active" : "")"
+                @onclick='() => tenantFilter = "inactive"'>
+            Inactifs
+        </button>
+    </div>
+</div>
+
+
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="alert alert-success fade-message">@message</div>
+}
+
+<!-- FORMULAIRE -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center"
+    style="cursor:pointer"
+    @onclick="ToggleForm">
+
+        <h6 class="mb-0">➕ Ajouter un bien</h6>
+        <span>@(isFormCollapsed ? "▶" : "▼")</span>
+    </div>
+
+    @if (!isFormCollapsed)
+    {
+        <div class="card-body">
+
+            <!-- HEADER -->
+            <div class="mb-3">
+                <h6 class="fw-bold mb-1">🏢 Informations du bien</h6>
+                <div class="text-muted small">Renseignez les détails principaux</div>
+            </div>
+
+            <!-- INFORMATIONS -->
+            <div class="mb-3">
+                <div class="text-uppercase text-muted small fw-semibold mb-2">Informations</div>
+
+                <input class="form-control form-control-sm mb-2"
+                placeholder="Résidence"
+                @bind="newProperty.ResidentialComplex" />
+
+                <input class="form-control form-control-sm mb-2"
+                placeholder="Titre"
+                @bind="newProperty.Title" />
+
+                <!-- 🔥 ADRESSE STRUCTURÉE -->
+                <div class="mb-2">
+                    <div class="text-muted small mb-1">Adresse</div>
+
+                    <input class="form-control form-control-sm mb-2"
+                    placeholder="Rue"
+                    @bind="newProperty.Address" />
+
+                    <div class="row g-2">
+                        <div class="col-4">
+                            <input class="form-control form-control-sm"
+                            placeholder="Code postal"
+                            @bind="newProperty.PostalCode" />
+                        </div>
+
+                        <div class="col-8">
+                            <input class="form-control form-control-sm"
+                            placeholder="Ville"
+                            @bind="newProperty.City" />
+                        </div>
+                    </div>
+                    <!-- 🔥 DATE D'ACQUISITION -->
+                    <div class="mb-2">
+                        <div class="text-muted small mb-1">Acquisition du bien</div>
+
+                        <input class="form-control form-control-sm"
+                        type="date"
+                        @bind="newProperty.AcquisitionDate"
+                        @bind:format="yyyy-MM-dd" />
+                    </div>
+                </div>
+
+                <textarea class="form-control form-control-sm mb-2"
+                placeholder="Description"
+                rows="2"
+                @bind="newProperty.Description"></textarea>
+
+                <!-- 🔥 TYPE DE BIEN -->
+                <select class="form-control form-control-sm mb-2"
+                @bind="newProperty.PropertyTypeId">
+                    <option value="">Type de bien</option>
+                    @foreach (var t in propertyTypes)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+
+                <!-- 🔥 SURFACE -->
+                <input class="form-control form-control-sm mb-2"
+                type="number"
+                placeholder="Surface (m²)"
+                @bind="newProperty.Surface" />
+
+                <!-- 🔥 MEUBLÉ -->
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input"
+                    type="checkbox"
+                    @bind="newProperty.IsFurnished" />
+                    <label class="form-check-label">
+                        🛋️ Meublé
+                    </label>
+                </div>
+
+                <!-- 🔥 FEATURES -->
+                <div class="mb-2">
+                    <div class="text-muted small mb-1">Caractéristiques</div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var f in features)
+                        {
+                            <div class="form-check">
+                                <input type="checkbox"
+                                class="form-check-input"
+                                checked="@selectedFeatures.Contains(f.Id)"
+                                @onchange="e => ToggleFeature(f.Id)" />
+
+                                <label class="form-check-label small">
+                                    @f.Name
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- FINANCES -->
+            <div class="mb-3">
+                <div class="text-uppercase text-muted small fw-semibold mb-2">Montant</div>
+
+                <div class="row g-2">
+                    <div class="col-4">
+                        <input class="form-control form-control-sm"
+                        type="number"
+                        placeholder="Loyer"
+                        @bind="newProperty.RentAmount" />
+                    </div>
+
+                    <div class="col-4">
+                        <input class="form-control form-control-sm"
+                        type="number"
+                        placeholder="Caution"
+                        @bind="newProperty.DepositAmount" />
+                    </div>
+
+                    <div class="col-4">
+                        <input class="form-control form-control-sm"
+                        type="number"
+                        placeholder="Charges"
+                        @bind="newProperty.ChargesAmount" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- STATUS -->
+            <div class="mb-3">
+                <div class="text-uppercase text-muted small fw-semibold mb-2">Statut</div>
+
+                <div class="form-check form-switch">
+                    <input class="form-check-input"
+                    type="checkbox"
+                    @bind="newProperty.IsActive" />
+                    <label class="form-check-label">
+                        Bien actif
+                    </label>
+                </div>
+            </div>
+
+            <!-- IMAGE -->
+            <div class="mb-3">
+                <div class="text-uppercase text-muted small fw-semibold mb-2">Photo</div>
+
+                <InputFile OnChange="OnFileSelected"
+                class="form-control form-control-sm" />
+            </div>
+
+            <!-- ACTION -->
+            <button class="btn btn-primary w-100 shadow-sm" @onclick="AddProperty">
+                ➕ Ajouter le bien
+            </button>
+
+        </div>
+    }
+</div>
+
+@if (properties == null)
+{
+    <p>Chargement...</p>
+}
+else
+{
+    <div class="row">
+        @foreach (var p in GetFilteredProperties())
+        {
+            var isOccupied = p.LeaseContracts?.Any(l => l.EndDate == null) == true;
+            var isFree = !isOccupied && p.Sold == false;
+            var isSold = p.Sold == true;
+            var activeLease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+            var tenant = activeLease?.Tenant;
+
+            <div class="col-12 col-sm-6 col-lg-4 mb-3">
+
+                <div class="card property-card h-100">
+
+                    <!-- IMAGE -->
+                    <div class="position-relative">
+
+                        @if (!string.IsNullOrEmpty(p.MainPhotoPath))
+                        {
+                            <img src="@p.MainPhotoPath" class="card-img-top property-img" />
+                        }
+                        else
+                        {
+                            <div class="property-img placeholder d-flex align-items-center justify-content-center">
+                                <span>Pas d'image</span>
+                            </div>
+                        }
+
+                        <!-- MENU EDITION RAPIDE -->
+                        <button class="btn btn-light btn-sm rounded-circle shadow position-absolute"
+                        style="bottom:10px; right:10px; width:38px; height:38px;"
+                        @onclick="() => OpenEditModal(p)">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+
+                        <!-- STATUT + CANDIDATURES (bas gauche empilé) -->
+                        <div class="position-absolute top-0 start-0 m-2 d-flex flex-column gap-1">
+                            @if (p.AcceptingCandidates)
+                            {
+                                <span class="badge bg-success">
+                                    📢 Candidatures ouvertes
+                                </span>
+                            }
+
+                        </div>
+
+                        <div class="position-absolute bottom-0 start-0 m-2 d-flex flex-column gap-1">
+
+                            @{
+                                var activeCandidates = p.CandidateList?
+                                .Where(c => c.IsActive)
+                                .ToList() ?? new List<Candidate>();
+                            }
+
+                            @if (isFree && activeCandidates.Count > 0)
+                            {
+                                <span class="badge bg-danger">
+                                    👥 @activeCandidates.Count
+                                </span>
+                            }
+
+                        </div>
+
+                        <!-- MENU -->
+                        <div class="position-absolute top-0 end-0 m-2 dropdown">
+                            <button class="btn btn-light btn-sm rounded-circle shadow-sm"
+                            data-bs-toggle="dropdown">
+                                <i class="bi bi-three-dots"></i>
+                            </button>
+
+                            <ul class="dropdown-menu dropdown-menu-end">
+
+                                <li>
+                                    <button class="dropdown-item" @onclick="() => GoToCandidates(p.Id)">
+                                        👥 Candidats
+                                    </button>   
+                                </li>
+
+                                <li><hr class="dropdown-divider" /></li>
+
+                                <li>
+                                    <button class="dropdown-item"
+                                    @onclick="() => Liberer(p)">
+                                        🔓 Libérer le bien
+                                    </button>
+                                </li>
+
+                                <li>
+                                    <button class="dropdown-item" @onclick="() => ConfirmAccepting(p)">
+                                        @(p.AcceptingCandidates ? "⛔ Fermer candidatures" : "📢 Ouvrir candidatures")
+                                    </button>
+                                </li>
+
+                                <li><hr class="dropdown-divider" /></li>
+
+                                <li>
+                                    <button class="dropdown-item"
+                                    @onclick="() => ConfirmActivInactivProperty(p.Id)">
+                                        @(p.IsActive ? "⛔ Désactiver le bien" : "📢 Activer le bien")
+                                    </button>
+                                </li>
+
+                                <li>
+                                    <button class="dropdown-item"
+                                    @onclick="() => ConfirmPropertySold(p.Id)">
+                                        🤝 Vendu
+                                    </button>
+                                </li>
+
+                                <li><hr class="dropdown-divider" /></li>
+
+                                <li>
+                                    <button class="dropdown-item text-danger"
+                                    @onclick="() => ConfirmDelete(p.Id)">
+                                        🗑️ Supprimer
+                                    </button>
+                                </li>
+
+                            </ul>
+                        </div>
+
+                    </div>
+
+                    <!-- CONTENU -->
+                    <div class="card-body p-3">
+                        <div class="text-muted mb-1" style="font-size: 0.8rem;">
+                            @p.ResidentialComplex
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-start mb-1">
+
+                            <div>
+                                <h6 class="mb-1 fw-bold">
+                                    @(p.PropertyType?.Name ?? "Non défini") @(p.Surface.HasValue ? p.Surface.Value : 0) m²
+                                </h6>
+
+                                @if (p.IsFurnished)
+                                {
+                                    <span class="badge bg-info">
+                                        🛋️ Meublé
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-light text-dark border">
+                                        🚫 Non meublé
+                                    </span>
+                                }
+                            </div>
+
+                            @if (p.Sold)
+                            {
+                                <span class="badge bg-dark">Vendu</span>
+                            }
+                            else if (!(p.LeaseContracts?.Any(l => l.EndDate == null) == true))
+                            {
+                                <span class="badge bg-success">Libre</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark">Occupé</span>
+                            }
+                        </div>
+                        <div class="text-muted small mb-2">
+                            📍 @p.Address<br />
+                            @p.PostalCode @p.City
+                        </div>
+
+                        <div class="mb-1 d-flex justify-content-between align-items-center">
+                            <span class="fw-bold fs-5">
+                                @($"{p.RentAmount:N0} €")
+                            </span>
+
+                            @if (tenant != null)
+                            {
+                                <div class="d-flex justify-content-end align-items-center gap-2">
+                                    <span class="small fw-semibold text-muted">
+                                        Loué par :
+                                    </span>
+
+                                    <span class="badge bg-primary">
+                                        👤 @tenant.FirstName @tenant.LastName
+                                    </span>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- CAUTION + CHARGES -->
+                        <div class="text-muted mb-3" style="font-size: 0.8rem;">
+
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="fw-semibold">Caution :</span>
+                                <span>@($"{p.DepositAmount:N0} €")</span>
+
+                                <span>/</span>
+
+                                <span class="fw-semibold">Charges :</span>
+                                <span>@($"{p.ChargesAmount:N0} €")</span>
+                            </div>
+
+                        </div>
+
+                        <!-- AFFICHAGE DES FEATURES -->
+                        @if (p.PropertyFeatures != null && p.PropertyFeatures.Any())
+                        {
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+
+                                @foreach (var f in p.PropertyFeatures.Select(x => x.Feature))
+                                {
+                                    <span class="badge rounded-pill bg-light text-dark border">
+                                        @f.Name
+                                    </span>
+                                }
+
+                            </div>
+                        }
+
+                        <!-- TAUX D'OCCUPATION
+                        Taux d’occupation = (Durée occupée / Durée totale) ​* 100
+                        -->
+                        @{
+                            var occupancy = GetOccupancyRate(p);
+                        }
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                <span>Taux d'occupation</span>
+                                <span>@occupancy%</span>
+                            </div>
+
+                            <div class="progress">
+                                <div class="progress-bar
+                                        @(occupancy > 70 ? "bg-success" :
+                                          occupancy > 30 ? "bg-warning" : "bg-danger")"
+                                style="width:@occupancy%">
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+        }
+    </div>
+}
+
+@if (editProperty != null)
+{
+    <div class="modal fade show d-block" style="background:rgba(0,0,0,0.5)">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+
+                <div class="modal-header">
+                    <h5 class="modal-title">✏️ Modifier le bien</h5>
+                    <button class="btn-close" @onclick="CloseEditModal"></button>
+                </div>
+
+                <div class="modal-body">
+
+                    <!-- HEADER -->
+                    <div class="mb-3">
+                        <h6 class="fw-bold mb-1">🏢 Informations du bien</h6>
+                        <div class="text-muted small">Modification des détails</div>
+                    </div>
+
+                    <!-- INFORMATIONS -->
+                    <div class="mb-3">
+                        <div class="text-uppercase text-muted small fw-semibold mb-2">Informations</div>
+
+                        <input class="form-control form-control-sm mb-2"
+                        placeholder="Résidence"
+                        @bind="editProperty.ResidentialComplex" />
+
+                        <input class="form-control form-control-sm mb-2"
+                        placeholder="Titre"
+                        @bind="editProperty.Title" />
+
+                        <div class="mb-2">
+                            <div class="text-muted small mb-1">Adresse</div>
+
+                            <input class="form-control form-control-sm mb-2"
+                            placeholder="Rue"
+                            @bind="editProperty.Address" />
+
+                            <div class="row g-2">
+                                <div class="col-4">
+                                    <input class="form-control form-control-sm"
+                                    placeholder="Code postal"
+                                    @bind="editProperty.PostalCode" />
+                                </div>
+
+                                <div class="col-8">
+                                    <input class="form-control form-control-sm"
+                                    placeholder="Ville"
+                                    @bind="editProperty.City" />
+                                </div>
+                            </div>
+
+                            <div class="mb-2">
+                                <div class="text-muted small mb-1">Acquisition du bien</div>
+
+                                <input class="form-control form-control-sm"
+                                type="date"
+                                @bind="editProperty.AcquisitionDate"
+                                @bind:format="yyyy-MM-dd" />
+                            </div>
+                        </div>
+
+                        <textarea class="form-control form-control-sm mb-2"
+                        rows="2"
+                        @bind="editProperty.Description"></textarea>
+
+                        <!-- TYPE -->
+                        <select class="form-control form-control-sm mb-2"
+                        @bind="editProperty.PropertyTypeId">
+                            <option value="">Type de bien</option>
+                            @foreach (var t in propertyTypes)
+                            {
+                                <option value="@t.Id">@t.Name</option>
+                            }
+                        </select>
+
+                        <!-- SURFACE -->
+                        <input class="form-control form-control-sm mb-2"
+                        type="number"
+                        placeholder="Surface (m²)"
+                        @bind="editProperty.Surface" />
+
+                        <!-- MEUBLÉ -->
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input"
+                            type="checkbox"
+                            @bind="editProperty.IsFurnished" />
+                            <label class="form-check-label">🛋️ Meublé</label>
+                        </div>
+
+                        <!-- FEATURES -->
+                        <div class="mb-2">
+                            <div class="text-muted small mb-1">Caractéristiques</div>
+
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var f in features)
+                                {
+                                    <div class="form-check">
+                                        <input type="checkbox"
+                                        class="form-check-input"
+                                        checked="@editSelectedFeatures.Contains(f.Id)"
+                                        @onchange="() => ToggleEditFeature(f.Id)" />
+
+                                        <label class="form-check-label small">
+                                            @f.Name
+                                        </label>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- IMAGE -->
+                    <div class="mb-3">
+                        <div class="text-uppercase text-muted small fw-semibold mb-2">Photo du bien</div>
+
+                        @if (!string.IsNullOrEmpty(editProperty.MainPhotoPath))
+                        {
+                            <div class="mb-2">
+                                <img src="@editProperty.MainPhotoPath"
+                                     class="img-fluid rounded shadow-sm"
+                                     style="max-height:200px; object-fit:cover;" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-muted small mb-2">
+                                Aucune photo
+                            </div>
+                        }
+
+                        <InputFile OnChange="OnEditPropertyImageSelected"
+                                   class="form-control form-control-sm" />
+                    </div>
+
+                    <!-- FINANCES -->
+                    <div class="mb-3">
+                        <div class="text-uppercase text-muted small fw-semibold mb-2">Montant</div>
+
+                        <div class="row g-2">
+                            <div class="col-4">
+                                <input class="form-control form-control-sm"
+                                type="number"
+                                placeholder="Loyer"
+                                @bind="editProperty.RentAmount" />
+                            </div>
+
+                            <div class="col-4">
+                                <input class="form-control form-control-sm"
+                                type="number"
+                                placeholder="Caution"
+                                @bind="editProperty.DepositAmount" />
+                            </div>
+
+                            <div class="col-4">
+                                <input class="form-control form-control-sm"
+                                type="number"
+                                placeholder="Charges"
+                                @bind="editProperty.ChargesAmount" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STATUS -->
+                    <div class="mb-3">
+                        <div class="text-uppercase text-muted small fw-semibold mb-2">Statut</div>
+
+                        <div class="form-check form-switch">
+                            <input class="form-check-input"
+                            type="checkbox"
+                            @bind="editProperty.IsActive" />
+                            <label class="form-check-label">Bien actif</label>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseEditModal">Annuler</button>
+                    <button class="btn btn-primary" @onclick="SaveEditProperty">💾 Enregistrer</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+@code {
+
+    List<Property> properties;
+    Property newProperty = new Property();
+    Property? editProperty;
+    List<int> editSelectedFeatures = new();
+
+    private IBrowserFile? editImageFile;
+    IBrowserFile? selectedFile;
+
+    private bool isFormCollapsed = true;
+
+    string message = "";
+
+
+    List<PropertyType> propertyTypes = new();
+    List<Feature> features = new();
+    List<int> selectedFeatures = new();
+    Dictionary<int, string> newFeatureInput = new();
+
+    /// <summary>
+    /// Initialisation
+    /// </summary>
+    /// <returns></returns>
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+    /// <summary>
+    /// Afficher un message temporaire en haut de la page : mettre à jour la variable message, 
+    /// appeler StateHasChanged pour rafraîchir l'affichage, puis attendre 3 secondes avant de 
+    /// réinitialiser le message et rafraîchir à nouveau l'affichage pour faire disparaître le message. 
+    /// Cette méthode peut être utilisée pour afficher des notifications de succès ou d'erreur après 
+    /// une action de l'utilisateur (ajout/suppression/modification de bien). Note : il faut ajouter un 
+    /// élément dans le markup pour afficher la variable message 
+    /// (ex: <div class="alert alert-info">@message</div>), et 
+    /// styliser cet élément pour qu'il soit visible et positionné correctement sur la page.
+    /// </summary>
+    /// <param name="text"></param>
+    /// <returns></returns>
+    async Task ShowMessage(string text)
+    {
+        message = text;
+        StateHasChanged();
+
+        await Task.Delay(3000);
+
+        message = "";
+        StateHasChanged();
+    }
+    /// <summary>
+    /// Indique que le bien est vendu
+    /// </summary>
+    string tenantFilter = "active";
+    bool IsSold(Property p)
+    => p.Sold == true && p.SoldDate != null;
+    /// <summary>
+    /// Indique que le bien est actif : il doit être marqué comme actif, et ne pas être vendu 
+    /// (car un bien vendu peut rester actif pour l'historique, mais ne doit pas être 
+    /// considéré comme actif pour les filtres et l'affichage). Cette méthode est utilisée
+    /// pour filtrer les biens actifs dans la liste, et pour afficher le statut de chaque 
+    /// bien dans la carte. Note : un bien vendu peut rester actif pour permettre de 
+    /// conserver son historique et ses données, mais il ne sera pas considéré comme 
+    /// actif pour les filtres et l'affichage grâce à cette méthode qui vérifie aussi 
+    /// le statut de vente du bien.
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    bool IsActiveProperty(Property p)
+        => p.IsActive == true && !IsSold(p);
+
+    /// <summary>
+    /// Récupérer le taux d'occupation d'un bien : calculer la durée totale depuis la date d'acquisition du bien (ou une date de référence si l'acquisition est trop ancienne) jusqu'à aujourd'hui, puis calculer la durée totale d'occupation en sommant les périodes d'occupation définies par les contrats de location (en prenant en compte les contrats actifs et passés). Enfin, calculer le taux d'occupation en divisant la durée d'occupation par la durée totale et en multipliant par 100 pour obtenir un pourcentage. Cette méthode est utilisée pour afficher le taux d'occupation de chaque bien dans la carte, et peut être utilisée pour filtrer les biens selon leur taux d'occupation si besoin.
+    /// </summary>
+    /// <returns></returns>
+    IEnumerable<Property> GetFilteredProperties()
+    {
+        IEnumerable<Property> query = properties;
+
+        if (tenantFilter == "active")
+            query = query.Where(p => p.IsActive && !(p.Sold && p.SoldDate != null));
+
+        if (tenantFilter == "inactive")
+            query = query.Where(p => !p.IsActive || (p.Sold && p.SoldDate != null));
+
+        return query;
+    }
+    /// <summary>
+    /// Toggle de l'affichage du formulaire d'ajout de bien : si le formulaire est 
+    /// actuellement plié, le déplier (afficher), sinon le plier (cacher). Cette méthode 
+    /// est appelée lors du clic sur l'en-tête du formulaire "Ajouter un bien". L'état 
+    /// du formulaire est géré par la variable booléenne isFormCollapsed, qui est initialisée à 
+    /// true (formulaire plié) et inversée à chaque appel de cette méthode pour alterner entre les deux états.
+    /// </summary>
+    void ToggleForm()
+    {
+        isFormCollapsed = !isFormCollapsed;
+    }
+    /// <summary>
+    /// Message de confirmation pour l'ouverture/fermeture des candidatures d'un bien
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    async Task ConfirmAccepting(Property p)
+    {
+        var action = p.AcceptingCandidates ? "fermer" : "ouvrir";
+
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"{action.ToUpper()} le bien aux candidats ?");
+
+        if (!ok) return;
+
+        await ToggleAccepting(p);
+    }
+    /// <summary>
+    /// Toggle de l'état d'acceptation des candidatures pour un bien : si le bien acceptait 
+    /// les candidatures, le fermer (mettre à false), sinon l'ouvrir (mettre à true) et 
+    /// mettre à jour la date de changement d'état. Après la modification, recharger la 
+    /// liste des biens pour rafraîchir l'affichage. Cette méthode est appelée depuis le 
+    /// menu d'action de chaque bien, après confirmation de l'utilisateur.
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    async Task ToggleAccepting(Property p)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var property = db.Properties.FirstOrDefault(x => x.Id == p.Id);
+        if (property == null) return;
+
+        property.AcceptingCandidates = !property.AcceptingCandidates;
+        property.AcceptingCandidatesDate = DateTime.Now;
+
+        await db.SaveChangesAsync();
+
+        await Load();
+
+        if (!p.AcceptingCandidates)
+            await ShowMessage("Campagne de candidatures ouverte");
+        else await ShowMessage("Campagne de candidatures fermée");
+    }
+    /// <summary>
+    /// Toggle de la sélection d'une caractéristique dans le formulaire d'ajout de bien : 
+    /// si l'id de la caractéristique est déjà présent dans la liste selectedFeatures, 
+    /// le retirer (désélectionner), sinon l'ajouter (sélectionner). Cette méthode est 
+    /// appelée lors du clic sur une caractéristique dans la liste des caractéristiques 
+    /// disponibles dans le formulaire d'ajout de bien. La liste selectedFeatures contient 
+    /// les id des caractéristiques sélectionnées, qui seront ensuite associées 
+    /// au bien lors de son ajout en base de données.
+    /// </summary>
+    /// <param name="id"></param>
+    void ToggleFeature(int id)
+    {
+        if (selectedFeatures.Contains(id))
+            selectedFeatures.Remove(id);
+        else
+            selectedFeatures.Add(id);
+    }
+    /// <summary>
+    /// Methode pour charger les biens du propriétaire courant : récupérer l'id du 
+    /// propriétaire courant, puis charger les biens associés à ce propriétaire en 
+    /// incluant les données du locataire et des candidatures pour pouvoir les afficher 
+    /// dans la liste. Si aucun propriétaire n'est connecté, initialiser la liste à vide pour éviter les erreurs d'affichage. Cette méthode est appelée lors de l'initialisation du composant, et après chaque ajout/suppression/modification de bien pour rafraîchir la liste affichée.
+    /// </summary>
+    /// <returns></returns>
+    async Task Load()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+        using var db = DbFactory.CreateDbContext();
+
+        if (string.IsNullOrEmpty(ownerId))
+        {
+            properties = new List<Property>();
+            return;
+        }
+
+        properties = db.Properties
+            .Where(p => p.OwnerId == ownerId)
+            .Include(p => p.LeaseContracts)
+                .ThenInclude(l => l.Tenant)
+            .Include(p => p.CandidateList)
+            .Include(p => p.PropertyType)
+            .Include(p => p.PropertyFeatures)
+                .ThenInclude(pf => pf.Feature)
+            .AsNoTracking()
+            .ToList();
+
+        // charger les types de biens et les caractéristiques pour le
+        // formulaire d'ajout de bien
+        propertyTypes = db.PropertyTypes.ToList();
+        features = db.Features.ToList();
+    }
+    /// <summary>
+    /// Méthode appelée lors de la sélection d'un fichier dans le composant InputFile, 
+    /// pour stocker le fichier sélectionné dans la variable selectedFile et 
+    /// pouvoir ensuite le sauvegarder lors de l'ajout du bien
+    /// </summary>
+    /// <param name="e"></param>
+    void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+    }
+    /// <summary>
+    /// Enregistrer l'image uploadée dans le dossier wwwroot/uploads/properties, et retourner le chemin 
+    /// relatif à enregistrer en base de données pour pouvoir afficher l'image ensuite
+    /// </summary>
+    /// <param name="file"></param>
+    /// <returns></returns>
+    async Task<string?> SaveImageAsync(IBrowserFile file)
+    {
+        if (file == null) return null;
+
+        var folder = Path.Combine("wwwroot", "uploads/properties");
+
+        if (!Directory.Exists(folder))
+            Directory.CreateDirectory(folder);
+
+        var fileName = Guid.NewGuid() + Path.GetExtension(file.Name);
+        var path = Path.Combine(folder, fileName);
+
+        await using var stream = new FileStream(path, FileMode.Create);
+        await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(stream);
+
+        return "/uploads/properties/" + fileName;
+    }
+    /// <summary>
+    /// Ajouter un bien : récupérer l'id du propriétaire courant, sauvegarder l'image si elle existe, 
+    /// puis ajouter le bien à la base de données et recharger la liste
+    /// </summary>
+    /// <returns></returns>
+    async Task AddProperty()
+    {
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        if (selectedFile != null)
+        {
+            newProperty.MainPhotoPath = await SaveImageAsync(selectedFile);
+        }
+
+        if (newProperty.AcquisitionDate == null)
+        {
+            newProperty.AcquisitionDate = DateTime.Today;
+        }
+
+        newProperty.OwnerId = ownerId;
+
+        using var db = DbFactory.CreateDbContext();
+
+        db.Properties.Add(newProperty);
+
+        await db.SaveChangesAsync();
+
+        // Features
+        foreach (var featureId in selectedFeatures)
+        {
+            db.PropertyFeatures.Add(new PropertyFeature
+                {
+                    PropertyId = newProperty.Id,
+                    FeatureId = featureId
+                });
+        }
+
+        await db.SaveChangesAsync();
+
+        newProperty = new Property();
+        selectedFile = null;
+        selectedFeatures.Clear();
+
+        await Load();
+
+        await ShowMessage("Nouveau bien ajouté avec succès !");
+    }
+    /// <summary>
+    /// Ajoute des features aux biens
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    async Task AddFeatureToProperty(Property p)
+    {
+        if (!newFeatureInput.ContainsKey(p.Id))
+            return;
+
+        var name = newFeatureInput[p.Id];
+
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        using var db = DbFactory.CreateDbContext();
+
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        // 🔥 1. vérifier si feature existe déjà
+        var normalized = name.Trim().ToLower();
+
+        var feature = await db.Features
+            .FirstOrDefaultAsync(f => f.Name.ToLower() == normalized);
+
+        // 🔥 2. si non, créer
+        if (feature == null)
+        {
+            feature = new Feature
+                {
+                    Name = name
+                };
+
+            db.Features.Add(feature);
+            await db.SaveChangesAsync();
+        }
+
+        // 🔥 3. lier au bien si pas déjà lié
+        var exists = await db.PropertyFeatures
+            .AnyAsync(x => x.PropertyId == p.Id && x.FeatureId == feature.Id);
+
+        if (!exists)
+        {
+            db.PropertyFeatures.Add(new PropertyFeature
+                {
+                    PropertyId = p.Id,
+                    FeatureId = feature.Id
+                });
+
+            await db.SaveChangesAsync();
+        }
+
+        newFeatureInput[p.Id] = "";
+
+        await Load();
+    }
+    /// <summary>
+    /// Navigation vers la page des candidats d'un bien, en passant l'id du bien en
+    /// query string pour pouvoir charger les candidats associés à ce bien
+    /// </summary>
+    /// <param name="propertyId"></param>
+    void GoToCandidates(int propertyId)
+    {
+        Nav.NavigateTo($"/candidates?propertyId={propertyId}");
+    }
+    /// <summary>
+    /// Message de confirmation pour la suppression d'un bien
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task ConfirmDelete(int id)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Supprimer ce bien ?");
+
+        if (ok)
+        {
+            await Delete(id);
+        }
+    }
+    /// <summary>
+    /// Message de confirmation pour la vente du bien
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task ConfirmPropertySold(int id)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Marquer ce bien comme vendu ?");
+
+        if (ok)
+        {
+            await PropertySold(id);
+        }
+
+    }
+    /// <summary>
+    /// Message de confirmation pour l'activation/désactivation d'un bien : si le bien est actuellement actif, demander confirmation pour le désactiver, sinon demander confirmation pour l'activer. Après confirmation, appeler la méthode ActivInactivProperty pour effectuer le changement d'état. Cette méthode est appelée depuis le menu d'action de chaque bien.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task ConfirmActivInactivProperty(int id)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Changer le status de ce bien ?");
+
+        if (ok)
+        {
+            await ActivInactivProperty(id);
+        }
+
+    }
+    /// <summary>
+    /// Activer/désactiver un bien : si le bien est actuellement actif, le désactiver (mettre IsActive à false), sinon l'activer (mettre IsActive à true) et mettre à jour la date de changement d'état. Si le bien est désactivé alors qu'il était occupé, clôturer le contrat de location actif en mettant sa date de fin à aujourd'hui pour libérer le bien. Après la modification, recharger la liste des biens pour rafraîchir l'affichage. Cette méthode est appelée depuis le menu d'action de chaque bien, après confirmation de l'utilisateur.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task ActivInactivProperty(int id)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var p = db.Properties.Find(id);
+
+        if (p != null)
+        {
+            p.Sold = false;
+            p.AcceptingCandidates = false;
+            p.ActivInactivDate = DateTime.Now;
+            p.IsActive = !p.IsActive;
+
+            // 🔥 on clôture le contrat actif
+            var lease = await db.LeaseContracts
+                .FirstOrDefaultAsync(l => l.PropertyId == p.Id && l.EndDate == null);
+
+            if (lease != null)
+            {
+                lease.EndDate = DateTime.Now;
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await Load();
+
+        await ShowMessage("Bien marquer comme vendu avec succès !");
+    }
+    /// <summary>
+    /// Vente d'un bien : le marquer comme vendu, le libérer de son locataire et 
+    /// fermer les candidatures
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task PropertySold(int id)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var p = db.Properties.Find(id);
+
+        if (p != null)
+        {
+            p.Sold = true;
+            p.AcceptingCandidates = false;
+            p.SoldDate = DateTime.Now;
+
+            var lease = await db.LeaseContracts
+                .FirstOrDefaultAsync(l => l.PropertyId == p.Id && l.EndDate == null);
+
+            if (lease != null)
+            {
+                lease.EndDate = DateTime.Now;
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await Load();
+
+        await ShowMessage("Bien marquer comme vendu avec succès !");
+    }
+    /// <summary>
+    /// Suppression d'un bien : le supprimer de la base de données, ce qui supprimera aussi 
+    /// les candidatures associées (cascade delete)
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    async Task Delete(int id)
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var p = db.Properties.Find(id);
+
+        if (p != null)
+        {
+            db.Properties.Remove(p);
+            await db.SaveChangesAsync();
+        }
+
+        await Load();
+
+        await ShowMessage("Bien supprimé avec succès !");
+    }
+    /// <summary>
+    /// Libérer un bien : mettre à null le locataire, réactiver les candidatures, et
+    /// désactiver le locataire (inactif tant qu'il n'a pas de bien) et les candidatures
+    /// associées à ce locataire
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    async Task Liberer(Property p)
+    {
+        var confirm = await JS.InvokeAsync<bool>("confirm", "Libérer ce bien ?");
+        if (!confirm) return;
+
+        using var db = DbFactory.CreateDbContext();
+
+        var property = db.Properties
+            .FirstOrDefault(x => x.Id == p.Id);
+
+        if (property == null) return;
+
+        // 🔥 1. fermer le contrat actif
+        var lease = db.LeaseContracts
+            .FirstOrDefault(x => x.PropertyId == property.Id && x.EndDate == null);
+
+        int? tenantId = null;
+
+        if (lease != null)
+        {
+            lease.EndDate = DateTime.Now;
+            tenantId = lease.TenantId;
+        }
+
+        // 🔥 2. propriété devient disponible
+        property.AcceptingCandidates = true;
+
+        // 🔥 3. désactiver tenant si existant
+        if (tenantId != null)
+        {
+            var tenant = db.Tenants
+                .FirstOrDefault(x => x.Id == tenantId);
+
+            if (tenant != null)
+            {
+                tenant.IsActive = false;
+            }
+
+            var candidates = db.Candidates
+                .Where(x => x.TenantId == tenantId)
+                .ToList();
+
+            foreach (var c in candidates)
+            {
+                c.TenantId = null;
+                c.Status = "Interested";
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        await Load();
+
+        await ShowMessage("Le bien a été libéré avec succès !");
+    }
+    /// <summary>
+    /// Retourner le taux d'occupation d'un bien : calculer la durée totale depuis l'acquisition du bien,
+    /// </summary>
+    /// <param name="p"></param>
+    /// <returns></returns>
+    double GetOccupancyRate(Property p)
+    {
+        if (p.AcquisitionDate == null)
+            return 0;
+
+        var start = p.AcquisitionDate.Value.Date;
+        var end = DateTime.Today;
+
+        var totalDays = (end - start).TotalDays;
+        if (totalDays <= 0)
+            return 0;
+
+        var leases = p.LeaseContracts ?? new List<LeaseContract>();
+
+        double rentedDays = 0;
+
+        foreach (var lease in leases)
+        {
+            var leaseStart = lease.StartDate.Date;
+            var leaseEnd = lease.EndDate?.Date ?? DateTime.Today;
+
+            // clamp dans la période du bien
+            var effectiveStart = leaseStart < start ? start : leaseStart;
+            var effectiveEnd = leaseEnd > end ? end : leaseEnd;
+
+            if (effectiveEnd > effectiveStart)
+            {
+                rentedDays += (effectiveEnd - effectiveStart).TotalDays;
+            }
+        }
+
+        return Math.Round((rentedDays / totalDays) * 100, 1);
+    }
+    /// <summary>
+    /// Ouvre le modal d'édition d'un bien en copiant les données du bien sélectionné dans
+    /// la variable editProperty, qui est utilisée pour lier les champs du formulaire d'édition.
+    /// Cette méthode est appelée lors du clic sur l'action "Modifier" dans le menu de chaque
+    /// bien, et permet d'afficher le modal avec les informations du bien pré-remplies pour pouvoir
+    /// les modifier. La variable editProperty est ensuite utilisée pour enregistrer
+    /// les modifications apportées au bien lors de la validation du formulaire d'édition.
+    /// </summary>
+    /// <param name="p"></param>
+    void OpenEditModal(Property p)
+    {
+        editProperty = new Property
+            {
+                Id = p.Id,
+                ResidentialComplex = p.ResidentialComplex,
+                Title = p.Title,
+                Address = p.Address,
+                PostalCode = p.PostalCode,
+                City = p.City,
+                AcquisitionDate = p.AcquisitionDate,
+                Description = p.Description,
+                PropertyTypeId = p.PropertyTypeId,
+                Surface = p.Surface,
+                IsFurnished = p.IsFurnished,
+                RentAmount = p.RentAmount,
+                DepositAmount = p.DepositAmount,
+                ChargesAmount = p.ChargesAmount,
+                IsActive = p.IsActive
+            };
+
+        editSelectedFeatures = p.PropertyFeatures?
+            .Select(x => x.FeatureId)
+            .ToList() ?? new();
+    }
+    /// <summary>
+    /// Toggle  
+    /// </summary>
+    /// <param name="id"></param>
+    void ToggleEditFeature(int id)
+    {
+        if (editSelectedFeatures.Contains(id))
+            editSelectedFeatures.Remove(id);
+        else
+            editSelectedFeatures.Add(id);
+    }
+    /// <summary>
+    /// Ferme le modal d'édition en réinitialisant la variable editProperty à null, ce qui masque le modal dans le markup. Cette méthode est appelée lors du clic sur le bouton de fermeture du modal, ou après l'enregistrement des modifications pour fermer le modal et revenir à la liste des biens.
+    /// </summary>
+    void CloseEditModal()
+    {
+        editProperty = null;
+    }
+    /// <summary>
+    /// Enregistre les modifications apportées à un bien depuis le formulaire d'édition : récupérer le bien en base de données à partir de l'id de editProperty, puis mettre à jour les champs du bien avec les valeurs modifiées dans editProperty. Après la sauvegarde, réinitialiser editProperty à null pour fermer le modal, recharger la liste des biens pour rafraîchir l'affichage, et afficher un message de succès. Cette méthode est appelée lors du clic sur le bouton "Enregistrer" dans le modal d'édition.
+    /// </summary>
+    /// <returns></returns>
+    async Task SaveEditProperty()
+    {
+        using var db = DbFactory.CreateDbContext();
+
+        var p = await db.Properties
+            .Include(x => x.PropertyFeatures)
+            .FirstOrDefaultAsync(x => x.Id == editProperty.Id);
+
+        if (p == null) return;
+
+        // champs
+        p.ResidentialComplex = editProperty.ResidentialComplex;
+        p.Title = editProperty.Title;
+        p.Address = editProperty.Address;
+        p.PostalCode = editProperty.PostalCode;
+        p.City = editProperty.City;
+        p.AcquisitionDate = editProperty.AcquisitionDate;
+        p.Description = editProperty.Description;
+        p.PropertyTypeId = editProperty.PropertyTypeId;
+        p.Surface = editProperty.Surface;
+        p.IsFurnished = editProperty.IsFurnished;
+        p.RentAmount = editProperty.RentAmount;
+        p.DepositAmount = editProperty.DepositAmount;
+        p.ChargesAmount = editProperty.ChargesAmount;
+        p.IsActive = editProperty.IsActive;
+
+        // FEATURES reset + rebuild
+        db.PropertyFeatures.RemoveRange(p.PropertyFeatures);
+
+        foreach (var id in editSelectedFeatures)
+        {
+            db.PropertyFeatures.Add(new PropertyFeature
+                {
+                    PropertyId = p.Id,
+                    FeatureId = id
+                });
+        }
+
+		// IMAGE enregistrement si nouvelle image sélectionnée
+        if (editImageFile != null)
+        {
+            var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+            var folder = Path.Combine(
+                Env.WebRootPath,
+                "uploads",
+                "Properties");
+
+            Directory.CreateDirectory(folder);
+
+            var fileName = Guid.NewGuid() + Path.GetExtension(editImageFile.Name);
+            var filePath = Path.Combine(folder, fileName);
+
+            await using var stream = new FileStream(filePath, FileMode.Create);
+            await editImageFile.OpenReadStream(50 * 1024 * 1024).CopyToAsync(stream);
+
+            p.MainPhotoPath = $"/uploads/Properties/{fileName}";
+        }
+
+        await db.SaveChangesAsync();
+
+        editProperty = null;
+        await Load();
+        await ShowMessage("Bien modifié avec succès !");
+    }
+
+    private void OnEditPropertyImageSelected(InputFileChangeEventArgs e)
+    {
+        editImageFile = e.File;
+    }
+}

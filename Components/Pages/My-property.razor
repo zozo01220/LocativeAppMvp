@@ -1,0 +1,392 @@
+﻿@page "/my-property"
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using LocativeApp.Data
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Tenant,Candidate")]
+
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="mb-0">
+        <i class="bi bi-house-door-fill me-2"></i>
+        Ma location
+    </h3>
+</div>
+
+@if (isLoading)
+{
+    <div class="text-center mt-5">
+        <div class="spinner-border text-primary"></div>
+    </div>
+}
+else if (candidate == null)
+{
+    <div class="alert alert-warning shadow-sm">
+        Aucun dossier candidat trouvé.
+    </div>
+}
+else if (candidate.Property == null)
+{
+    <div class="alert alert-info shadow-sm">
+        Aucun bien associé.
+    </div>
+}
+else
+{
+    <div class="container-fluid px-0">
+
+        <div class="row g-4">
+
+            <!-- 🏠 PROPERTY CARD -->
+            <div class="col-12 col-lg-7">
+
+                <div class="card shadow-sm border-0 overflow-hidden">
+
+                    <!-- IMAGE + OVERLAY -->
+                    <div class="position-relative">
+
+                        @if (!string.IsNullOrEmpty(candidate.Property.MainPhotoPath))
+                        {
+                            <img src="@candidate.Property.MainPhotoPath"
+                            class="w-100"
+                            style="height:300px;object-fit:cover;" />
+                        }
+
+                        <div class="position-absolute bottom-0 start-0 w-100 p-3"
+                        style="background: linear-gradient(transparent, rgba(0,0,0,0.7));">
+
+                            <h4 class="text-white mb-1">
+                                @candidate.Property.Title
+                            </h4>
+
+                            <div class="text-white-50 small">
+                                📍 @candidate.Property.Address
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- INFOS -->
+                    <div class="card-body">
+
+                        <div class="row text-center mb-3">
+
+                            <div class="col">
+                                <div class="fw-bold">@candidate.Property.RentAmount</div>
+                                <small class="text-muted">Loyer</small>
+                            </div>
+
+                            <div class="col">
+                                <div class="fw-bold">@candidate.Property.ChargesAmount</div>
+                                <small class="text-muted">Charges</small>
+                            </div>
+
+                            <div class="col">
+                                <div class="fw-bold">@candidate.Property.DepositAmount</div>
+                                <small class="text-muted">Caution</small>
+                            </div>
+
+                        </div>
+
+                        <hr />
+
+                        <!-- STATUS -->
+@*                         <div class="d-flex justify-content-between align-items-center">
+
+                            <span class="text-muted">Statut du dossier</span>
+
+                            <span class="badge px-3 py-2 @GetStatusBadge(candidate.Status)">
+                                @GetStatusLabel(candidate.Status)
+                            </span>
+
+                        </div> *@
+                        <!-- STATUS + DOCUMENTS QUICK LINKS -->
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+
+                            <span class="text-muted">Statut du dossier</span>
+
+                            <span class="badge px-3 py-2 @GetStatusBadge(candidate.Status)">
+                                @GetStatusLabel(candidate.Status)
+                            </span>
+
+                        </div>
+
+                        @if (candidate.Status == "Tenant")
+                        {
+                            <div class="border-top pt-3">
+
+                                <div class="d-flex justify-content-between align-items-center">
+
+                                    <!-- 📄 ÉTAT DES LIEUX -->
+                                    <div class="text-start">
+                                        <small class="text-muted d-block">État des lieux</small>
+
+                                        @if (etatDesLieuxFiles.Any())
+                                        {
+                                            <a href="@etatDesLieuxFiles.First()"
+                                               target="_blank"
+                                               class="text-decoration-none fw-semibold text-primary">
+                                                Ouvrir
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">Indisponible</span>
+                                        }
+                                    </div>
+
+                                    <!-- TRAIT VERTICAL -->
+                                    <div style="width:1px; height:40px; background:#e9ecef;"></div>
+
+                                    <!-- 📑 BAIL -->
+                                    <div class="text-end">
+                                        <small class="text-muted d-block">Bail</small>
+
+                                        @if (bailFiles.Any())
+                                        {
+                                            <a href="@bailFiles.First()"
+                                               target="_blank"
+                                               class="text-decoration-none fw-semibold text-primary">
+                                                Ouvrir
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">Indisponible</span>
+                                        }
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        }
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- DOCUMENTS -->
+            @* <div class="card shadow-sm border-0 h-100">
+
+                <div class="card-header bg-white fw-bold">
+                    📂 Documents
+                </div>
+
+                <div class="card-body">
+
+                    <!-- 📄 ETAT DES LIEUX -->
+                    <div class="mb-4">
+
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <div class="fw-semibold">
+                                📄 État des lieux
+                            </div>
+
+                            <span class="badge bg-secondary">
+                                @etatDesLieuxFiles.Count
+                            </span>
+                        </div>
+
+                        @if (!etatDesLieuxFiles.Any())
+                        {
+                            <div class="text-muted small">
+                                Aucun état des lieux disponible
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group">
+
+                                @foreach (var file in etatDesLieuxFiles)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                                        <div class="d-flex align-items-center gap-2">
+
+                                            <i class="bi bi-file-earmark-pdf text-danger fs-5"></i>
+
+                                            <div class="small text-truncate" style="max-width:200px;">
+                                                @Path.GetFileName(file)
+                                            </div>
+
+                                        </div>
+
+                                        <a href="@file"
+                                           target="_blank"
+                                           class="btn btn-sm btn-outline-primary">
+                                            Ouvrir
+                                        </a>
+
+                                    </div>
+                                }
+
+                            </div>
+                        }
+
+                    </div>
+
+                    <!-- 📑 BAIL -->
+                    <div>
+
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <div class="fw-semibold">
+                                📑 Bail
+                            </div>
+
+                            <span class="badge bg-secondary">
+                                @bailFiles.Count
+                            </span>
+                        </div>
+
+                        @if (!bailFiles.Any())
+                        {
+                            <div class="text-muted small">
+                                Aucun bail disponible
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group">
+
+                                @foreach (var file in bailFiles)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                                        <div class="d-flex align-items-center gap-2">
+
+                                            <i class="bi bi-file-earmark-text text-primary fs-5"></i>
+
+                                            <div class="small text-truncate" style="max-width:200px;">
+                                                @Path.GetFileName(file)
+                                            </div>
+
+                                        </div>
+
+                                        <a href="@file"
+                                           target="_blank"
+                                           class="btn btn-sm btn-outline-primary">
+                                            Ouvrir
+                                        </a>
+
+                                    </div>
+                                }
+
+                            </div>
+                        }
+
+                    </div>
+
+                </div>
+
+            </div>*@
+
+        </div> 
+
+    </div>
+}
+
+@code {
+
+    private Candidate? candidate;
+    private bool isLoading = true;
+
+    // Documents importants pour le locataire
+    private List<string> etatDesLieuxFiles = new();
+    private List<string> bailFiles = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var email = user.Identity?.Name;
+
+        if (!string.IsNullOrEmpty(email))
+        {
+            candidate = await Db.Candidates
+                .Include(c => c.Property)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Email == email);
+        }
+
+		// Chargement des documents uniquement si un bien est associé
+        if (candidate?.Property != null)
+        {
+            await LoadDocuments();
+        }
+
+        isLoading = false;
+    }
+
+    private string GetStatusLabel(string status)
+    {
+        return status switch
+        {
+            "Interested" => "⏳ Intéressé",
+            "InReview" => "🔎 En cours d'étude",
+            "Accepted" => "✔ Accepté",
+            "Rejected" => "✖ Refusé",
+            "Tenant" => "🏠 Locataire",
+            _ => status
+        };
+    }
+
+    private string GetStatusBadge(string status)
+    {
+        return status switch
+        {
+            "Interested" => "bg-secondary",
+            "InReview" => "bg-warning text-dark",
+            "Accepted" => "bg-success",
+            "Rejected" => "bg-danger",
+            "Tenant" => "bg-primary",
+            _ => "bg-light text-dark"
+        };
+    }
+
+    async Task LoadDocuments()
+    {
+        var email = candidate?.Email;
+        if (candidate == null) return;
+
+        // ⚠️ adapte si tu as ownerId ailleurs
+        var ownerId = candidate.OwnerId;
+
+        var folder = $"{candidate.FirstName}_{candidate.LastName}".Replace(" ", "_");
+
+        var basePath = Path.Combine(
+            "wwwroot",
+            "uploads",
+            "Tenants",
+            ownerId,
+            folder,
+            "DocumentsCommun"
+        );
+
+        var etatPath = Path.Combine(basePath, "EtatLieux");
+        var bailPath = Path.Combine(basePath, "Bail");
+
+        if (Directory.Exists(etatPath))
+        {
+            etatDesLieuxFiles = Directory.GetFiles(etatPath)
+                .Select(f => $"/uploads/Tenants/{ownerId}/{folder}/DocumentsCommun/EtatLieux/{Path.GetFileName(f)}")
+                .ToList();
+        }
+
+        if (Directory.Exists(bailPath))
+        {
+            bailFiles = Directory.GetFiles(bailPath)
+                .Select(f => $"/uploads/Tenants/{ownerId}/{folder}/DocumentsCommun/Bail/{Path.GetFileName(f)}")
+                .ToList();
+        }
+    }
+}

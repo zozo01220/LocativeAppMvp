@@ -1,0 +1,631 @@
+﻿@page "/loyers"
+@rendermode InteractiveServer
+
+@using LocativeApp.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+
+@inject IJSRuntime JS
+@inject LocativeApp.Services.RentService RentService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CurrentOwnerService CurrentOwnerService
+
+@attribute [Authorize]
+@attribute [Authorize(Roles = "Admin")]
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+
+    <h3 class="mb-0">
+        <i class="bi bi-cash-stack me-2"></i>
+        Gestion des loyers
+    </h3>
+
+    <div class="btn-group">
+        <button class="btn btn-outline-secondary @(rentFilter == "all" ? "active" : "")"
+                @onclick='() => rentFilter = "all"'>
+            Tous
+        </button>
+
+        <button class="btn btn-outline-danger @(rentFilter == "unpaid" ? "active" : "")"
+                @onclick='() => rentFilter = "unpaid"'>
+            Impayés
+        </button>
+    </div>
+</div>
+
+<!-- 🔧 ACTIONS SAAS -->
+<div class="mb-3 d-flex gap-2 flex-wrap">
+
+    <button class="btn btn-primary"
+            @onclick="GenerateCurrentMonth">
+        ➕ Générer mois courant
+    </button>
+
+    <input type="number" class="form-control" style="width:100px"
+           @bind="manualYear" placeholder="Année" />
+
+    <input type="number" class="form-control" style="width:80px"
+           @bind="manualMonth" placeholder="Mois" />
+
+    <button class="btn btn-outline-primary"
+            @onclick="GenerateManualMonth">
+        Créer période
+    </button>
+
+</div>
+
+@if (showSuccessMessage)
+{
+    <div class="alert alert-success fade-message">@successMessage</div>
+}
+
+<style>
+    .fade-message {
+    animation: fadeOut 3s forwards;
+    }
+
+    @@keyframes fadeOut {
+    0% {
+    opacity: 1;
+    }
+
+    80% {
+    opacity: 1;
+    }
+
+    100% {
+    opacity: 0;
+    }
+    }
+
+    .property-card {
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+
+    .rent-card {
+    border-radius: 10px;
+    border: 1px solid #eee;
+    }
+</style>
+
+@{
+    var filtered = GetFilteredProperties();
+}
+
+@if (!filtered.Any())
+{
+    <div class="alert alert-info text-center">
+        @if (rentFilter == "unpaid")
+        {
+            <span>✅ Aucun impayé pour le moment</span>
+        }
+        else
+        {
+            <span>ℹ️ Aucun bien à afficher</span>
+        }
+    </div>
+}
+else
+{
+    @foreach (var p in filtered)
+    {
+        var totalDue = GetTotalDue(p);
+
+        var activeLease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+        var tenant = activeLease?.Tenant;
+
+
+        <div class="card mb-3 property-card">
+
+            <div class="card-header d-flex justify-content-between align-items-center position-relative"
+                 style="cursor:pointer"
+                 @onclick="() => ToggleProperty(p.Id)">
+
+                <!-- 🏠 INFOS BIEN -->
+                <div>
+                    <div class="fw-semibold">
+                        👤 @tenant.FirstName @tenant.LastName
+                    </div>
+
+                    <small class="text-muted">
+                        @p.PropertyType?.Name @(p.Surface.HasValue ? p.Surface.Value : 0) m²
+                    </small>
+
+                    <div class="text-muted small">
+                        @p.Address, @p.PostalCode @p.City
+                    </div>
+                </div>
+
+                <!-- 🔥 DROITE (BADGES + ACTIONS) -->
+                <div class="d-flex align-items-start gap-2">
+
+                    <div class="d-flex flex-column align-items-end gap-1">
+
+                        @if (p.IsFurnished)
+                        {
+                            <span class="badge bg-info">
+                                🛋️ Meublé
+                            </span>
+                        }
+
+                        <span class="text-muted small">
+                            @(expanded.Contains(p.Id) ? "▼" : "▶")
+                        </span>
+
+                    </div>
+
+                    @if (totalDue > 0)
+                    {
+                        <span class="badge bg-danger align-self-start">
+                            💰 @($"{totalDue:N0} €")
+                        </span>
+                    }
+
+                </div>
+
+            </div>
+
+            @if (expanded.Contains(p.Id))
+            {
+                <div class="card-body">
+
+                    @if (totalDue > 0)
+                    {
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+
+                            <!-- 🔵 Bouton payer -->
+                            <button class="btn btn-sm btn-outline-success"
+                            @onclick="() => PayAllUnpaid(p)">
+                                ⚡ Payer tous les retards
+                            </button>
+
+                            <!-- 🟢 Toggle style iPhone -->
+                            <div class="form-check form-switch d-flex align-items-center gap-2">
+
+                                <input class="form-check-input"
+                                type="checkbox"
+                                role="switch"
+                                checked="@(unpaidOnlyPerProperty.ContainsKey(p.Id) && unpaidOnlyPerProperty[p.Id])"
+                                @onchange="(e) => ToggleUnpaidFilter(e, p.Id)" />
+
+                                <label class="form-check-label small text-muted"
+                                for="toggleUnpaid_@p.Id">
+                                    Impayés uniquement
+                                </label>
+
+                            </div>
+
+                        </div>
+                    }
+
+                    @foreach (var m in GetFilteredMonths(p))
+                    {
+                        var pay = payments
+                        .Where(x => x.TenantId == tenant.Id && x.Year == m.Year && x.Month == m.Month)
+                        .OrderByDescending(x => x.PaidDate)
+                        .FirstOrDefault();
+
+                        bool isPaid = pay?.IsPaid == true;
+                        var amount = p.RentAmount + p.ChargesAmount;
+                        var datePaid = pay?.PaidDate?.ToString("dd/MM/yyyy") ?? "Non payé";
+
+                        <div class="card rent-card mb-2">
+                            <div class="card-body p-3">
+
+                                <div class="d-flex justify-content-between">
+                                    <strong>@($"{m.Month:D2}/{m.Year}")</strong>
+
+                                    @if (isPaid)
+                                    {
+                                        <span class="badge bg-success">Payé</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger">Impayé</span>
+                                    }
+                                </div>
+
+                                <div class="text-muted small mt-1">
+                                    💰 @amount €
+                                </div>
+
+                                <div class="text-muted small mt-1">
+                                    📅 @datePaid
+                                </div>
+
+                                <div class="mt-2 text-end">
+                                    @if (isPaid)
+                                    {
+                                        <button class="btn btn-sm btn-outline-warning"
+                                        @onclick="() => SetUnpaid(p, m)">
+                                            Annuler paiement
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-primary"
+                                        @onclick="() => SetPaid(p, m)">
+                                            Régulariser
+                                        </button>
+                                    }
+                                </div>
+
+                            </div>
+                        </div>
+                    }
+
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+
+    List<Property> properties = new();
+    List<RentPayment> payments = new();
+    Dictionary<int, List<(int Year, int Month)>> monthsCache = new();
+
+    List<int> expanded = new();
+
+    string rentFilter = "all";
+    string successMessage = "";
+    bool showSuccessMessage = false;
+
+    int manualYear = DateTime.Now.Year;
+    int manualMonth = DateTime.Now.Month;
+
+    /// <summary>
+    /// Méthode d'initialisation du composant, appelée automatiquement par Blazor lors du chargement de la page. Elle utilise le service de location pour charger les données nécessaires à l'affichage des loyers et des paiements. Cette méthode est asynchrone pour éviter de bloquer l'interface utilisateur pendant le chargement des données.
+    /// </summary>
+    /// <returns></returns>
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    // =========================
+    // 🔥 LOAD DATA SaaS SAFE
+    // =========================
+    async Task LoadData()
+    {
+        using var db = DbFactory.CreateDbContext();
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        properties = await db.Properties
+            .Where(x => x.OwnerId == ownerId)
+            .Include(x => x.PropertyType)
+            .Include(x => x.LeaseContracts)
+                .ThenInclude(l => l.Tenant)
+            .ToListAsync();
+
+        payments = await db.RentPayments
+            .Where(x => x.OwnerId == ownerId)
+            .ToListAsync();
+
+        monthsCache.Clear();
+
+        foreach (var p in properties)
+        {
+            var activeLease = p.LeaseContracts?
+                .FirstOrDefault(l => l.EndDate == null);
+
+            if (activeLease?.Tenant == null)
+                continue;
+
+            var tenant = activeLease.Tenant;
+
+            var serviceMonths = RentService.GetMonths(tenant.CreatedAt);
+
+            var dbMonths = payments
+                .Where(x => x.TenantId == tenant.Id)
+                .Select(x => (x.Year, x.Month));
+
+            monthsCache[tenant.Id] = serviceMonths
+                .Concat(dbMonths)
+                .Distinct()
+                .OrderByDescending(x => x.Year)
+                .ThenByDescending(x => x.Month)
+                .ToList();
+        }
+    }
+
+    // Toggle Unpaid style iPhone
+    Dictionary<int, bool> unpaidOnlyPerProperty = new();
+    void ToggleUnpaidFilter(ChangeEventArgs e, int propertyId)
+    {
+        var isChecked = e.Value as bool? == true;
+
+        unpaidOnlyPerProperty[propertyId] = isChecked;
+
+        StateHasChanged(); // 🔥 IMPORTANT BLAZOR
+    }
+
+    // =========================
+    // 🔥 GENERATION MENSUELLE
+    // =========================
+    async Task GenerateCurrentMonth()
+    {
+        var now = DateTime.Now;
+
+        await GenerateForPeriod(now.Year, now.Month);
+
+        await AfterGeneration("Loyers du mois générés");
+    }
+
+    // =========================
+    // 🔥 GENERATION MANUELLE
+    // =========================
+    // int manualYear = DateTime.Now.Year;
+    // int manualMonth = DateTime.Now.Month;
+
+    async Task GenerateManualMonth()
+    {
+        if (manualMonth < 1 || manualMonth > 12)
+        {
+            await ShowMessage("❌ Mois invalide");
+            return;
+        }
+
+        await GenerateForPeriod(manualYear, manualMonth);
+
+        await AfterGeneration("Loyers générés manuellement");
+    }
+
+    // =========================
+    // 🔥 CORE GENERATION + ANTI DOUBLON + MULTI TENANT
+    // =========================
+    async Task GenerateForPeriod(int year, int month)
+    {
+        using var db = DbFactory.CreateDbContext();
+        var ownerId = await CurrentOwnerService.GetOwnerIdAsync();
+
+        var propertiesList = await db.Properties
+            .Where(x => x.OwnerId == ownerId)
+            .Include(x => x.LeaseContracts)
+                .ThenInclude(l => l.Tenant)
+            .ToListAsync();
+
+        foreach (var property in propertiesList)
+        {
+            var activeLease = property.LeaseContracts?
+                .FirstOrDefault(l => l.EndDate == null);
+
+            if (activeLease?.Tenant == null)
+                continue;
+
+            var tenant = activeLease.Tenant;
+
+            // 🔥 ANTI-DOUBLON
+            var exists = await db.RentPayments.AnyAsync(x =>
+                x.OwnerId == ownerId &&
+                x.TenantId == tenant.Id &&
+                x.PropertyId == property.Id &&
+                x.Year == year &&
+                x.Month == month);
+
+            if (exists)
+                continue;
+
+            db.RentPayments.Add(new RentPayment
+                {
+                    OwnerId = ownerId,
+                    TenantId = tenant.Id,
+                    PropertyId = property.Id,
+                    Year = year,
+                    Month = month,
+                    IsPaid = false,
+                    AmountPaid = property.RentAmount ?? 0 + property.ChargesAmount ?? 0
+                });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    //recharge DB + cache months/payments
+    async Task AfterGeneration(string message)
+    {
+        await LoadData();             
+        await InvokeAsync(StateHasChanged); 
+        await ShowMessage(message);   
+    }
+
+    async Task ShowMessage(string text)
+    {
+        successMessage = text;
+        showSuccessMessage = true;
+
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(3000);
+
+        showSuccessMessage = false;
+        successMessage = "";
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    List<Property> GetFilteredProperties()
+    {
+        var baseList = properties.Where(p =>
+            p.LeaseContracts?.Any(l => l.EndDate == null) == true);
+
+        if (rentFilter == "all")
+            return baseList.ToList();
+
+        return baseList
+            .Where(p => GetTotalDue(p) > 0)
+            .ToList();
+    }
+
+    IEnumerable<(int Year, int Month)> GetFilteredMonths(Property p)
+    {
+        var activeLease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+        if (activeLease?.Tenant == null)
+            return Enumerable.Empty<(int Year, int Month)>();
+
+        var tenantId = activeLease.Tenant.Id;
+
+        var months = monthsCache.ContainsKey(tenantId)
+            ? monthsCache[tenantId]
+            : Enumerable.Empty<(int Year, int Month)>();
+
+        var onlyUnpaid = unpaidOnlyPerProperty.ContainsKey(p.Id)
+            && unpaidOnlyPerProperty[p.Id];
+
+        if (!onlyUnpaid)
+            return months;
+
+        return months.Where(m =>
+        {
+            var pay = payments.FirstOrDefault(x =>
+                x.TenantId == tenantId &&
+                x.Year == m.Year &&
+                x.Month == m.Month);
+
+            return pay == null || !pay.IsPaid;
+        });
+    }
+    decimal GetTotalDue(Property p)
+    {
+        var activeLease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+        if (activeLease?.Tenant == null)
+            return 0;
+
+        var tenantId = activeLease.Tenant.Id;
+
+        if (!monthsCache.ContainsKey(tenantId))
+            return 0;
+
+        return monthsCache[tenantId].Sum(m =>
+        {
+            var pay = payments.FirstOrDefault(x =>
+                x.TenantId == tenantId &&
+                x.Year == m.Year &&
+                x.Month == m.Month);
+
+            return (pay == null || !pay.IsPaid)
+                ? p.RentAmount ?? 0 + p.ChargesAmount ?? 0
+                : 0;
+        });
+    }
+
+    void ToggleProperty(int id)
+    {
+        if (expanded.Contains(id))
+            expanded.Remove(id);
+        else
+            expanded.Add(id);
+    }
+
+    async Task SetPaid(Property p, (int Year, int Month) m)
+    {
+        var tenantId = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null)?
+            .Tenant?.Id;
+
+        if (tenantId == null)
+            return;
+
+        await RentService.MarkAsPaid(
+            tenantId.Value,
+            p.Id,
+            m.Year,
+            m.Month,
+            p.RentAmount ?? 0 + p.ChargesAmount ?? 0);
+
+        payments.Clear();
+        monthsCache.Clear();
+
+        await LoadData();
+
+        if (GetTotalDue(p) == 0)
+        {
+            unpaidOnlyPerProperty[p.Id] = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+        await ShowMessage("✔ Paiement enregistré");
+    }
+
+    async Task SetUnpaid(Property p, (int Year, int Month) m)
+    {
+        var tenantId = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null)?
+            .Tenant?.Id;
+
+        if (tenantId == null)
+            return;
+
+        await RentService.MarkAsUnpaid(tenantId.Value, m.Year, m.Month);
+
+        payments.Clear();
+        monthsCache.Clear();
+
+        await LoadData();
+
+        await InvokeAsync(StateHasChanged);
+        await ShowMessage("↩ Paiement annulé");
+    }
+
+    async Task PayAllUnpaid(Property p)
+    {
+        var lease = p.LeaseContracts?
+            .FirstOrDefault(l => l.EndDate == null);
+
+        var tenantId = lease?.Tenant?.Id;
+
+        if (tenantId == null)
+            return;
+
+        var months = monthsCache.ContainsKey(tenantId.Value)
+            ? monthsCache[tenantId.Value]
+            : Enumerable.Empty<(int Year, int Month)>();
+
+        foreach (var m in months)
+        {
+            var pay = payments.FirstOrDefault(x =>
+                x.TenantId == tenantId &&
+                x.Year == m.Year &&
+                x.Month == m.Month);
+
+            if (pay == null || !pay.IsPaid)
+            {
+                await RentService.MarkAsPaid(
+                    tenantId.Value,
+                    p.Id,
+                    m.Year,
+                    m.Month,
+                    p.RentAmount ?? 0 + p.ChargesAmount ?? 0);
+            }
+        }
+
+        await LoadData();
+
+        var stillHasDebt = monthsCache[tenantId.Value]
+            .Any(m =>
+            {
+                var pay = payments.FirstOrDefault(x =>
+                    x.TenantId == tenantId &&
+                    x.Year == m.Year &&
+                    x.Month == m.Month);
+
+                return pay == null || !pay.IsPaid;
+            });
+
+        if (!stillHasDebt)
+        {
+            unpaidOnlyPerProperty[p.Id] = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+        await ShowMessage("Tous les impayés ont été régularisés");
+    }
+
+}

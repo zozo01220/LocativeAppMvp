@@ -1,0 +1,270 @@
+﻿@page "/admins"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "SuperAdmin")]
+
+@inject OwnerService OwnerService
+@inject AdminService AdminService
+@inject IJSRuntime JS
+
+@using LocativeApp.Data
+
+<h3 class="mb-4">🛠️ Admins / Owners</h3>
+
+<!-- HEADER ACTIONS -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-3">
+
+    <!-- LEFT -->
+    <button class="btn btn-primary" @onclick="() => showCreateModal = true">
+        + Ajouter Admin
+    </button>
+
+@*     <!-- RIGHT KPI -->
+    <div class="d-flex gap-3">
+
+        <div class="kpi-card">
+            <div class="kpi-label">Owners</div>
+            <div class="kpi-value">@owners.Count</div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-label">Admins</div>
+            <div class="kpi-value">@admins.Count</div>
+        </div>
+
+    </div> *@
+
+</div>
+
+<!-- SEARCH -->
+<div class="mb-3">
+    <input class="form-control"
+           placeholder="Rechercher admin (email, prénom, nom)..."
+           @bind="searchText"
+           @bind:event="oninput" />
+</div>
+
+<!-- LIST -->
+<div class="owner-grid">
+
+    @foreach (var owner in owners
+    .Where(o =>
+    string.IsNullOrWhiteSpace(searchText)
+    || OwnerHasMatchingAdmins(o.Id)
+    ))
+    {
+        var ownerAdmins = GetAdmins(owner.Id);
+
+        <div class="owner-card">
+
+            <!-- HEADER -->
+            <div class="owner-card-header"
+                 @onclick="() => Toggle(owner.Id)">
+
+                <!-- LEFT -->
+                <div>
+                    <div class="fw-bold">🏢 @owner.Name</div>
+
+                    <small class="text-muted d-block">
+                        @owner.Email
+                    </small>
+
+                    <small class="text-muted">
+                        👤 @ownerAdmins.Count admin(s)
+                    </small>
+                </div>
+
+                <!-- RIGHT -->
+                <div class="text-end">
+
+                    <div>
+                        <span class="plan-badge @GetPlanClass(owner.Plan)">
+                            @owner.Plan
+                        </span>
+                    </div>
+
+                    <div class="mt-1">
+                        <span class="badge @(owner.IsActive ? "bg-success" : "bg-danger")">
+                            @(owner.IsActive ? "Active" : "Suspended")
+                        </span>
+                    </div>
+
+                    <div class="mt-1">
+                        @(IsCollapsed(owner.Id) ? "▶" : "▼")
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- BODY -->
+            @if (!IsCollapsed(owner.Id))
+            {
+                <div class="owner-card-body">
+
+                    @foreach (var a in ownerAdmins)
+                    {
+                        <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2">
+
+                            <div>
+                                <div class="fw-bold">@a.Email</div>
+                                <small>@a.FirstName @a.LastName</small>
+                            </div>
+
+                            <button class="btn btn-sm btn-outline-danger"
+                                    @onclick="() => DeleteAdmin(a.Id)">
+                                X
+                            </button>
+
+                        </div>
+                    }
+
+                </div>
+            }
+
+        </div>
+    }
+
+</div>
+
+<!-- MODAL CREATE -->
+@if (showCreateModal)
+{
+    <div class="modal-backdrop fade show"></div>
+
+    <div class="modal show d-block">
+        <div class="modal-dialog">
+            <div class="modal-content">
+
+                <div class="modal-header">
+                    <h5>Créer Admin</h5>
+                    <button class="btn-close" @onclick="CloseModal"></button>
+                </div>
+
+                <div class="modal-body">
+
+                    <select class="form-select mb-2" @bind="selectedOwnerId">
+                        <option value="">-- Owner --</option>
+                        @foreach (var o in owners)
+                        {
+                            <option value="@o.Id">@o.Name</option>
+                        }
+                    </select>
+
+                    <input class="form-control mb-2" placeholder="Email" @bind="adminEmail" />
+                    <input class="form-control mb-2" placeholder="Firstname" @bind="adminFirstName" />
+                    <input class="form-control mb-2" placeholder="Lastname" @bind="adminLastName" />
+                    <input class="form-control mb-2" type="password" placeholder="Password" @bind="adminPassword" />
+
+                </div>
+
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Annuler</button>
+                    <button class="btn btn-success" @onclick="CreateAdmin">Créer</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+
+    private List<Owner> owners = new();
+    private List<ApplicationUser> admins = new();
+
+    private string selectedOwnerId;
+    private string adminEmail;
+    private string adminPassword;
+    private string adminFirstName;
+    private string adminLastName;
+
+    private string searchText = "";
+    private bool showCreateModal = false;
+
+    private HashSet<string> collapsedOwners = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+
+        // PLIÉ PAR DÉFAUT
+        collapsedOwners = owners.Select(o => o.Id).ToHashSet();
+    }
+
+    private async Task Load()
+    {
+        owners = await OwnerService.GetAll();
+        admins = await AdminService.GetAll();
+    }
+
+    // FILTER GLOBAL
+    private List<ApplicationUser> GetFilteredAdmins()
+    {
+        return admins.Where(a =>
+            string.IsNullOrWhiteSpace(searchText)
+            || a.Email.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+            || (a.FirstName != null && a.FirstName.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+            || (a.LastName != null && a.LastName.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+        ).ToList();
+    }
+
+    private bool OwnerHasMatchingAdmins(string ownerId)
+    {
+        return GetAdmins(ownerId).Any();
+    }
+
+    private List<ApplicationUser> GetAdmins(string ownerId)
+    {
+        return GetFilteredAdmins()
+            .Where(a => a.OwnerId == ownerId)
+            .ToList();
+    }
+
+    private async Task CreateAdmin()
+    {
+        await AdminService.CreateAdmin(adminEmail, adminPassword,
+            selectedOwnerId, adminFirstName, adminLastName);
+
+        adminEmail = "";
+        adminPassword = "";
+        adminFirstName = "";
+        adminLastName = "";
+
+        showCreateModal = false;
+
+        await Load();
+    }
+
+    private async Task DeleteAdmin(string id)
+    {
+        await AdminService.DeleteAdmin(id);
+        await Load();
+    }
+
+    private void Toggle(string id)
+    {
+        if (collapsedOwners.Contains(id))
+            collapsedOwners.Remove(id);
+        else
+            collapsedOwners.Add(id);
+    }
+
+    private bool IsCollapsed(string id)
+        => collapsedOwners.Contains(id);
+
+    private void CloseModal()
+    {
+        showCreateModal = false;
+    }
+
+    private string GetPlanClass(string plan)
+    {
+        return plan?.ToLower() switch
+        {
+            "free" => "plan-free",
+            "pro" => "plan-pro",
+            "business" => "plan-business",
+            _ => "plan-free"
+        };
+    }
+}
